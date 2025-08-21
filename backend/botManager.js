@@ -4,7 +4,7 @@ const path = require('path');
 const qrcode = require('qrcode');
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const empresaDB = require('./models/Empresa');
-const handleMensagem = require('./handlers/chatbot');
+// const handleMensagem = require('./handlers/chatbot');
 
 const bots = {};  // cache { nomeEmpresa: sock }
 const atendimentosManuais = {};  // { chaveEmpresa_remetente: { ativo, ultimoContato, nomeEmpresa } }
@@ -47,83 +47,232 @@ async function iniciarBot(empresa) {
     }
   });
 
-  sock.ev.on('messages.upsert', async (m) => {
-    try {
-      const msg = m.messages?.[0];
-      const sender = msg.key.remoteJid;
-      if (!msg || !msg.message) return;
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { WritableStreamBuffer } = require('stream-buffers');
+const handleMensagem = require('./handlers/chatbot');
+const { transcreverAudio } = require('./transcreverAudio');
 
-      const texto =
-        msg.message?.conversation ||
-        msg.message?.extendedTextMessage?.text ||
-        msg.message?.imageMessage?.caption ||
-        msg.message?.videoMessage?.caption ||
-        msg.message?.documentMessage?.caption ||
-        msg.message?.buttonsResponseMessage?.selectedButtonId ||
-        msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-        '';
+sock.ev.on('messages.upsert', async (m) => {
+  try {
+    const msg = m.messages?.[0];
+    if (!msg || !msg.message) return;
 
-      const textoLower = texto.toLowerCase().trim();
-      const comandosPermitidosMesmoFromMe = ['#bot', '#sair', '#encerrar', 'bot'];
-      if (msg.key.fromMe && !comandosPermitidosMesmoFromMe.includes(textoLower)) return;
+    const sender = msg.key.remoteJid;
 
-      const empresaAtualizada = await empresaDB.findById(empresa._id);
-      if (!empresaAtualizada?.botAtivo) return;
+    // Extrai texto das mensagens
+    let texto =
+      msg.message?.conversation ||
+      msg.message?.extendedTextMessage?.text ||
+      msg.message?.imageMessage?.caption ||
+      msg.message?.videoMessage?.caption ||
+      msg.message?.documentMessage?.caption ||
+      msg.message?.buttonsResponseMessage?.selectedButtonId ||
+      msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+      '';
 
-      const chaveAtendimento = `${empresaAtualizada._id}_${sender}`;
-      const saudacoes = ['oi', 'olá', 'ola', 'bom dia', 'boa tarde', 'boa noite'];
-      const comandosEspeciais = ['#sair', '#bot', 'bot'];
-
-      if (comandosEspeciais.includes(textoLower)) {
-        if (textoLower === '#sair') {
-          delete atendimentosManuais[chaveAtendimento];
-          await sock.sendMessage(sender, { text: '✅ Conversa reiniciada. Digite "oi" para começar.' });
-          return;
-        }
-        if (textoLower === '#bot' || textoLower === 'bot') {
-          atendimentosManuais[chaveAtendimento] = { ativo: false, nomeEmpresa: empresaAtualizada.nome };
-          await sock.sendMessage(sender, { text: '🤖 Atendimento automático ativado.' });
-          return;
-        }
+    // Tratamento de áudio (voz)
+    if (msg.message?.voiceMessage || msg.message?.audioMessage) {
+      const type = msg.message.voiceMessage ? 'voiceMessage' : 'audioMessage';
+      const stream = await downloadContentFromMessage(msg.message[type], type.replace('Message', ''));
+      
+      const bufferStream = new WritableStreamBuffer();
+      for await (const chunk of stream) {
+        bufferStream.write(chunk);
       }
+      bufferStream.end();
 
-      const palavrasChaveAtendente = [
-        'atendente', 'humano', 'pessoa', 'falar com atendente', 'falar com humano',
-        'quero atendimento humano', 'quero falar com alguém', 'ajuda de um atendente',
-        'quero um atendente', 'preciso de ajuda humana'
-      ];
-
-      if (palavrasChaveAtendente.some(p => textoLower.includes(p))) {
-        atendimentosManuais[chaveAtendimento] = { 
-          ativo: true, 
-          ultimoContato: new Date(),
-          nomeEmpresa: empresaAtualizada.nome
-        };
-        await sock.sendMessage(sender, { text: '📨 Solicitação enviada ao atendente humano. Aguarde um momento.' });
-        return;
+      const audioBuffer = bufferStream.getContents();
+      if (audioBuffer) {
+        texto = await transcreverAudio(audioBuffer);
       }
-
-      if (atendimentosManuais[chaveAtendimento]?.ativo) {
-        atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
-        console.log(`👤 Atendimento humano ativo para: ${sender}`);
-        return;
-      }
-
-      if (saudacoes.includes(textoLower)) {
-        await sock.sendMessage(sender, {
-          text: 'Olá! 👋 Como posso te ajudar? Se quiser falar com um atendente humano, digite "atendente" ou "humano".'
-        });
-        return;
-      }
-
-      await sock.sendPresenceUpdate('composing', sender);
-      const resposta = await handleMensagem(empresaAtualizada._id, textoLower);
-      await sock.sendMessage(sender, { text: resposta.resposta });
-
-    } catch (err) {
-      console.error('❌ Erro no processamento da mensagem:', err);
     }
-  });
+
+    const textoLower = texto.toLowerCase().trim();
+    const comandosPermitidosMesmoFromMe = ['#bot', '#sair', '#encerrar', 'bot'];
+    if (msg.key.fromMe && !comandosPermitidosMesmoFromMe.includes(textoLower)) return;
+
+    const empresaAtualizada = await empresaDB.findById(empresa._id);
+    if (!empresaAtualizada?.botAtivo) return;
+
+    const chaveAtendimento = `${empresaAtualizada._id}_${sender}`;
+    const saudacoes = ['oi', 'olá', 'ola', 'bom dia', 'boa tarde', 'boa noite'];
+    const comandosEspeciais = ['#sair', '#bot', 'bot'];
+
+    // Comandos especiais
+    if (comandosEspeciais.includes(textoLower)) {
+      if (textoLower === '#sair') {
+        delete atendimentosManuais[chaveAtendimento];
+        await sock.sendMessage(sender, { text: '✅ Conversa reiniciada. Digite "oi" para começar.' });
+        return;
+      }
+      if (textoLower === '#bot' || textoLower === 'bot') {
+        atendimentosManuais[chaveAtendimento] = { ativo: false, nomeEmpresa: empresaAtualizada.nome };
+        await sock.sendMessage(sender, { text: '🤖 Atendimento automático ativado.' });
+        return;
+      }
+    }
+
+    // Palavras-chave para atendimento humano
+    const palavrasChaveAtendente = [
+      'atendente', 'humano', 'pessoa', 'falar com atendente', 'falar com humano',
+      'quero atendimento humano', 'quero falar com alguém', 'ajuda de um atendente',
+      'quero um atendente', 'preciso de ajuda humana'
+    ];
+
+    if (palavrasChaveAtendente.some(p => textoLower.includes(p))) {
+      atendimentosManuais[chaveAtendimento] = { 
+        ativo: true, 
+        ultimoContato: new Date(),
+        nomeEmpresa: empresaAtualizada.nome
+      };
+      await sock.sendMessage(sender, { text: '📨 Solicitação enviada ao atendente humano. Aguarde um momento.' });
+      return;
+    }
+
+    // Se atendimento humano ativo, apenas atualiza último contato
+    if (atendimentosManuais[chaveAtendimento]?.ativo) {
+      atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
+      console.log(`👤 Atendimento humano ativo para: ${sender}`);
+      return;
+    }
+
+    // Saudação inicial
+    if (saudacoes.includes(textoLower)) {
+      await sock.sendMessage(sender, {
+        text: `Olá! 👋 Bem-vindo(a) à ${empresaAtualizada.nome}! Como posso te ajudar? Se quiser falar com um atendente humano, digite "atendente" ou "humano".`
+      });
+      return;
+    }
+
+    // Atualiza presença
+    await sock.sendPresenceUpdate('composing', sender);
+
+    // Integração com Gemini (IA)
+    const { gerarRespostaGemini } = require('./gemini');
+    const respostaTexto = await gerarRespostaGemini(empresaAtualizada.promptIA, texto);
+    await sock.sendMessage(sender, { text: respostaTexto });
+
+  } catch (err) {
+    console.error('❌ Erro no processamento da mensagem:', err);
+  }
+});
+
+// sock.ev.on('messages.upsert', async (m) => {
+//   try {
+//     const msg = m.messages?.[0];
+//     if (!msg || !msg.message) return;
+
+//     const sender = msg.key.remoteJid;
+
+//     // Extrai texto das mensagens
+//     let texto =
+//       msg.message?.conversation ||
+//       msg.message?.extendedTextMessage?.text ||
+//       msg.message?.imageMessage?.caption ||
+//       msg.message?.videoMessage?.caption ||
+//       msg.message?.documentMessage?.caption ||
+//       msg.message?.buttonsResponseMessage?.selectedButtonId ||
+//       msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+//       '';
+
+//     // Tratamento de áudio
+//     if (msg.message?.voiceMessage || msg.message?.audioMessage) {
+//       const type = msg.message.voiceMessage ? 'voiceMessage' : 'audioMessage';
+//       const stream = await downloadContentFromMessage(msg.message[type], type.replace('Message', ''));
+      
+//       const bufferStream = new WritableStreamBuffer();
+//       for await (const chunk of stream) bufferStream.write(chunk);
+//       bufferStream.end();
+
+//       const audioBuffer = bufferStream.getContents();
+//       if (audioBuffer) texto = await transcreverAudio(audioBuffer);
+//     }
+
+//     const textoLower = texto.toLowerCase().trim();
+//     const comandosPermitidosMesmoFromMe = ['#bot', '#sair', '#encerrar', 'bot'];
+//     if (msg.key.fromMe && !comandosPermitidosMesmoFromMe.includes(textoLower)) return;
+
+//     const empresaAtualizada = await empresaDB.findById(empresa._id);
+//     if (!empresaAtualizada?.botAtivo) return;
+
+//     const chaveAtendimento = `${empresaAtualizada._id}_${sender}`;
+//     const saudacoes = ['oi', 'olá', 'ola', 'bom dia', 'boa tarde', 'boa noite'];
+//     const comandosEspeciais = ['#sair', '#bot', 'bot'];
+
+//     // === Comandos especiais para reiniciar bot ou resetar atendimento ===
+//     if (comandosEspeciais.includes(textoLower)) {
+//       if (textoLower === '#sair') {
+//         delete atendimentosManuais[chaveAtendimento];
+//         await sock.sendMessage(sender, { text: '✅ Conversa reiniciada. Digite "oi" para começar.' });
+//         return;
+//       }
+//       if (textoLower === '#bot' || textoLower === 'bot') {
+//         atendimentosManuais[chaveAtendimento] = { ativo: false, nomeEmpresa: empresaAtualizada.nome };
+//         await sock.sendMessage(sender, { text: '🤖 Atendimento automático ativado.' });
+//         return;
+//       }
+//     }
+
+//     // === Verifica se o remetente é humano autorizado via dashboard ===
+//     const humanosAutorizados = empresaAtualizada.numerosHumanos || []; // array de números cadastrados no frontend
+//     const isHumano = humanosAutorizados.includes(sender.split('@')[0]);
+
+//     // === Se humano autorizado, bloqueia IA ===
+//     if (isHumano) {
+//       atendimentosManuais[chaveAtendimento] = {
+//         ativo: true,
+//         ultimoContato: new Date(),
+//         nomeEmpresa: empresaAtualizada.nome
+//       };
+//       console.log(`👤 Atendimento humano ativo via número registrado: ${sender}`);
+//       return; // Bot NÃO responde
+//     }
+
+//     // === Palavras-chave do cliente para chamar atendimento humano ===
+//     const palavrasChaveAtendente = [
+//       'atendente', 'humano', 'pessoa', 'falar com atendente', 'falar com humano',
+//       'quero atendimento humano', 'quero falar com alguém', 'ajuda de um atendente',
+//       'quero um atendente', 'preciso de ajuda humana'
+//     ];
+
+//     if (palavrasChaveAtendente.some(p => textoLower.includes(p))) {
+//       atendimentosManuais[chaveAtendimento] = {
+//         ativo: true,
+//         ultimoContato: new Date(),
+//         nomeEmpresa: empresaAtualizada.nome
+//       };
+//       await sock.sendMessage(sender, { text: '📨 Solicitação enviada ao atendente humano. Aguarde um momento.' });
+//       return;
+//     }
+
+//     // === Se atendimento humano ativo, apenas atualiza último contato ===
+//     if (atendimentosManuais[chaveAtendimento]?.ativo) {
+//       atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
+//       console.log(`👤 Atendimento humano ativo para: ${sender}`);
+//       return;
+//     }
+
+//     // === Saudação inicial do bot ===
+//     if (saudacoes.includes(textoLower)) {
+//       await sock.sendMessage(sender, {
+//         text: `Olá! 👋 Bem-vindo(a) à ${empresaAtualizada.nome}! Como posso te ajudar? Se quiser falar com um atendente humano, digite "atendente" ou "humano".`
+//       });
+//       return;
+//     }
+
+//     // === Atualiza presença do bot ===
+//     await sock.sendPresenceUpdate('composing', sender);
+
+//     // === Resposta da IA Gemini ===
+//     const { gerarRespostaGemini } = require('./gemini');
+//     const respostaTexto = await gerarRespostaGemini(empresaAtualizada.promptIA, texto);
+//     await sock.sendMessage(sender, { text: respostaTexto });
+
+//   } catch (err) {
+//     console.error('❌ Erro no processamento da mensagem:', err);
+//   }
+// });
+
 
   bots[empresa.nome] = sock;
   const qrCodeBase64 = await qrCodePromise.then(qr => qrcode.toDataURL(qr));
@@ -224,3 +373,4 @@ module.exports = {
   toggleBot,
   deletarEmpresa
 };
+

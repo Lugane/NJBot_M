@@ -11,10 +11,15 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@google-cloud/speech": "^7.2.0",
     "@google/generative-ai": "^0.24.1",
     "bcryptjs": "^3.0.2",
     "jsonwebtoken": "^9.0.2",
-    "openai": "^5.11.0"
+    "openai": "^5.11.0",
+    "stream-buffers": "^3.0.3",
+    "vosk": "^0.3.39",
+    "wav": "^1.0.2"
   },
   "engines": {
     "node": ">=20.0.0"
