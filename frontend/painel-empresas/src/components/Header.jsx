@@ -51,7 +51,7 @@ function DashboardHeader() {
       <LogoSection>
         <LogoImg src={logo} alt="Logo NJBot" />
       </LogoSection>
-      <Saudacao>Bem-vindo ao painel do NJBot</Saudacao>
+      <Saudacao>Bem-Vindo ao NJBot</Saudacao>
     </Header>
   )
 }

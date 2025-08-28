@@ -1,126 +1,322 @@
+// import React, { useState, useEffect } from 'react';
+// import styled from 'styled-components';
+
+// const Container = styled.div`
+//   max-width: 700px;
+//   margin: 2rem auto;
+//   padding: 1.5rem 2rem;
+//   background-color: rgba(231, 201, 201, 0.73);
+//   border: 1.5px solid #80403860;
+//   border-radius: 8px;
+//   box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+//   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+// `;
+
+// const Title = styled.h2`
+//   text-align: center;
+//   margin-bottom: 1.5rem;
+//   color: #14213d;
+//   font-size: 1.2rem;
+// `;
+
+// const Form = styled.form`
+//   display: flex;
+//   flex-direction: column;
+//   gap: 1rem;
+// `;
+
+// const Input = styled.input`
+//   padding: 0.6rem 1rem;
+//   font-size: 1rem;
+//   border: 1.8px solid #2a9cf4a2;
+//   border-radius: 6px;
+//   transition: border-color 0.3s ease;
+
+
+//   &:focus {
+//     outline: none;
+//     border-color: #bb37379a;
+//     background-color: #e8f0fe;
+//   }
+// `;
+
+// const TextArea = styled.textarea`
+//   padding: 0.6rem 1rem;
+//   font-size: 1rem;
+//   border: 1.8px solid #2a9df4;
+//   border-radius: 6px;
+//   resize: vertical;
+//   min-height: 80px;
+//   transition: border-color 0.3s ease;
+
+//   &:focus {
+//     outline: none;
+//     border-color: #bb37379a;
+//     background-color: #e8f0fe;
+//   }
+// `;
+
+// const Label = styled.label`
+//   display: flex;
+//   align-items: center;
+//   gap: 0.5rem;
+//   font-weight: 500;
+//   color: #14213d;
+//   user-select: none;
+// `;
+
+// const Button = styled.button`
+//   padding: 0.75rem 1.2rem;
+//   font-size: 1rem;
+//   font-weight: 600;
+//   color: white;
+//   background-color: #14213d;
+//   border: none;
+//   border-radius: 6px;
+//   cursor: pointer;
+//   transition: background-color 0.3s ease;
+
+//   &:hover:not(:disabled) {
+//     background-color: #377040ff;
+//   }
+
+//   &:disabled {
+//     background-color: #7a7a7a;
+//     cursor: not-allowed;
+//   }
+// `;
+
+// const SmallButton = styled(Button)`
+//   width: 120px;
+//   padding: 0.4rem 0.8rem;
+//   font-size: 0.705rem;
+//   background-color: #e63946;
+
+//   &:hover:not(:disabled) {
+//     background-color: #d62828;
+//   }
+// `;
+
+// const MessageError = styled.p`
+//   color: #d90429;
+//   font-weight: 600;
+//   margin-top: 1rem;
+//   text-align: center;
+// `;
+
+// const MessageInfo = styled.p`
+//   color: #14213d;
+//   font-weight: 500;
+//   margin-top: 1rem;
+//   text-align: center;
+// `;
+
+// const QRCodeContainer = styled.div`
+//   margin-top: 1.5rem;
+//   text-align: center;
+
+//   img {
+//     max-width: 200px;
+//     border-radius: 12px;
+//     box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+//   }
+
+//   h3 {
+//     margin-bottom: 1rem;
+//     color: #14213d;
+//   }
+// `;
+
+// const SetorContainer = styled.div`
+//   display: flex;
+//   flex-direction: column;
+//   gap: 0.3rem;
+//   margin-bottom: 1rem;
+// `;
+
+// const CamposLinha = styled.div`
+//   display: flex;
+//   gap: 0.5rem;
+// `;
+
+// const CampoNome = styled(Input)`
+//   flex: 1;
+// `;
+
+// const CampoPrompt = styled(TextArea)`
+//   flex: 2;
+// `;
+
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 
 const Container = styled.div`
-  max-width: 700px;
+  width: 350px;
   margin: 2rem auto;
-  padding: 1.5rem 2rem;
-  background-color: rgba(231, 201, 201, 0.73);
-  border-radius: 8px;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  padding: 2rem;
+  background: #ffffffb6;
+  backdrop-filter: blur(6px);
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+  font-family: sans-serif;
 `;
 
 const Title = styled.h2`
   text-align: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
   color: #14213d;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
 `;
 
 const Form = styled.form`
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.2rem;
 `;
 
 const Input = styled.input`
-  padding: 0.6rem 1rem;
+  padding: 0.8rem 1rem;
   font-size: 1rem;
-  border: 1.8px solid #ccc;
-  border-radius: 6px;
-  transition: border-color 0.3s ease;
+  border: 1.8px solid #d0d7de;
+  border-radius: 8px;
+  transition: all 0.25s ease;
+  background: #fafafa;
+  font-family: sans-serif;
+
+
+  &:hover {
+    border-color: #999;
+  }
 
   &:focus {
     outline: none;
-    border-color: #2a9df4;
-    background-color: #e8f0fe;
+    border-color: #2563eb;
+    background-color: #f0f6ff;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
   }
 `;
 
 const TextArea = styled.textarea`
-  padding: 0.6rem 1rem;
+  padding: 0.8rem 1rem;
   font-size: 1rem;
-  border: 1.8px solid #ccc;
-  border-radius: 6px;
+  border: 1.8px solid #d0d7de;
+  border-radius: 8px;
   resize: vertical;
-  min-height: 80px;
-  transition: border-color 0.3s ease;
+  min-height: 100px;
+  transition: all 0.25s ease;
+  background: #fafafa;
+
+  &:hover {
+    border-color: #999;
+  }
 
   &:focus {
     outline: none;
-    border-color: #2a9df4;
-    background-color: #e8f0fe;
+    border-color: #2563eb;
+    background-color: #f0f6ff;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
   }
 `;
 
 const Label = styled.label`
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   font-weight: 500;
-  color: #14213d;
+  color: #1f2937;
+  cursor: pointer;
   user-select: none;
+
+  input {
+    accent-color: #2563eb;
+    transform: scale(1.1);
+    cursor: pointer;
+  }
 `;
 
 const Button = styled.button`
-  padding: 0.75rem 1.2rem;
+  padding: 0.9rem 1.4rem;
   font-size: 1rem;
   font-weight: 600;
   color: white;
-  background-color: #14213d;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: all 0.25s ease;
 
   &:hover:not(:disabled) {
-    background-color: #377040ff;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0px);
+    box-shadow: none;
   }
 
   &:disabled {
-    background-color: #7a7a7a;
+    background: #9ca3af;
     cursor: not-allowed;
   }
 `;
 
 const SmallButton = styled(Button)`
   width: 120px;
-  padding: 0.4rem 0.8rem;
-  font-size: 0.705rem;
-  background-color: #e63946;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  background: linear-gradient(135deg, #e63946, #d62828);
 
   &:hover:not(:disabled) {
-    background-color: #d62828;
+    box-shadow: 0 6px 16px rgba(214, 40, 40, 0.25);
   }
 `;
 
 const MessageError = styled.p`
-  color: #d90429;
+  color: #dc2626;
   font-weight: 600;
-  margin-top: 1rem;
+  margin-top: 1.5rem;
+  padding: 0.8rem 1rem;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
   text-align: center;
 `;
 
 const MessageInfo = styled.p`
-  color: #14213d;
+  color: #1e3a8a;
   font-weight: 500;
-  margin-top: 1rem;
+  margin-top: 1.5rem;
+  padding: 0.8rem 1rem;
+  background: #e0f2fe;
+  border: 1px solid #bae6fd;
+  border-radius: 6px;
   text-align: center;
 `;
 
 const QRCodeContainer = styled.div`
-  margin-top: 1.5rem;
+  margin-top: 2rem;
   text-align: center;
 
   img {
-    max-width: 200px;
+    max-width: 220px;
     border-radius: 12px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+    padding: 0.6rem;
+    background: white;
+    border: 1px solid #e5e7eb;
   }
 
   h3 {
     margin-bottom: 1rem;
-    color: #14213d;
+    color: #1f2937;
+    font-size: 1.2rem;
+    font-weight: 300;
+    font-family: sans-serif;
+
   }
 `;
 
@@ -133,7 +329,7 @@ const SetorContainer = styled.div`
 
 const CamposLinha = styled.div`
   display: flex;
-  gap: 0.5rem;
+  gap: 0.6rem;
 `;
 
 const CampoNome = styled(Input)`
@@ -143,6 +339,7 @@ const CampoNome = styled(Input)`
 const CampoPrompt = styled(TextArea)`
   flex: 2;
 `;
+
 
 
 const NovaEmpresa = () => {
@@ -223,11 +420,11 @@ const NovaEmpresa = () => {
 
   return (
     <Container>
-      <Title>Cadastrar Nova Empresa</Title>
+      <Title>Cadastrar Empresa:</Title>
       <Form onSubmit={handleSubmit}>
         <Input
           type="text"
-          placeholder="Nome da Empresa"
+          placeholder="Nome da Empresa:"
           value={nome}
           onChange={(e) => setNome(e.target.value)}
           required
@@ -235,14 +432,14 @@ const NovaEmpresa = () => {
 
         <Input
           type="text"
-          placeholder="Número do WhatsApp"
+          placeholder="Número do WhatsApp:"
           value={telefone}
           onChange={(e) => setTelefone(e.target.value)}
           required
         />
 
         <TextArea
-          placeholder="Prompt da IA"
+          placeholder="Prompt da IA:"
           value={promptIA}
           onChange={(e) => setPromptIA(e.target.value)}
           required
@@ -254,7 +451,7 @@ const NovaEmpresa = () => {
             checked={ativo}
             onChange={(e) => setAtivo(e.target.checked)}
           />
-          Bot ativo
+          Bot Ativo
         </Label>
 
         <Button type="submit" disabled={loading}>
