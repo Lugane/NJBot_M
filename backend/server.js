@@ -25,9 +25,13 @@ mongoose.connect(process.env.MONGO_URI, {
   .catch(err => console.error('❌ Erro ao conectar no MongoDB:', err));
 
 const JWT_SECRET = process.env.JWT_SECRET || 'chavejwtsegura';
+
+const ADMIN_EMAIL = process.env.LOGIN_FIXO_EMAIL
+const ADMIN_PASSWORD = process.env.LOGIN_FIXO_SENHA
+
 const USUARIO_FIXO = {
-  email: 'admin@njbot.com',
-  senha: '123456',
+  email: ADMIN_EMAIL,
+  senha: ADMIN_PASSWORD,
   nome: 'Administrador'
 };
 

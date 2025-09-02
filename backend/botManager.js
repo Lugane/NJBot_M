@@ -29,24 +29,33 @@ async function iniciarBot(empresa) {
       qrCodesGerados[empresa.nome] = await qrcode.toDataURL(qr);
       resolveQRCode(qr);
     }
-
+    
     if (connection === 'close') {
-      const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+    const statusCode = lastDisconnect?.error?.output?.statusCode;
 
-      const empresaAtualizada = await empresaDB.findById(empresa._id);
-      if (shouldReconnect && empresaAtualizada?.botAtivo) {
-        console.log(`[RECONNECT] Reconectando bot de ${empresaAtualizada.nome}...`);
-        iniciarBot(empresaAtualizada);
-        // statusBots[empresaAtualizada.nome] = { conectado: false, ultimaAtualizacao: new Date() };
-      } else {
-        console.log(`[RECONNECT] Não reconectando: botAtivo=${empresaAtualizada?.botAtivo}`);
-      }
-    }
+    const loggedOut = statusCode === DisconnectReason.loggedOut;
 
-    if (connection === 'open') {
-      console.log(`🤖 Conectado com sucesso: ${empresa.nome}`);
-      // statusBots[empresa.nome] = { conectado: true, ultimaAtualizacao: new Date() };
+    const empresaAtualizada = await empresaDB.findById(empresa._id);
+
+    if (!loggedOut && empresaAtualizada?.botAtivo) {
+      console.log(`[RECONNECT] Reconectando bot de ${empresaAtualizada.nome}...`);
+      iniciarBot(empresaAtualizada);
+
+      // enquanto reconecta, marca como desconectado temporário
+      statusBots[empresa._id] = { conectado: false, ultimaAtualizacao: new Date() };
+    } else {
+      console.log(`[RECONNECT] Não reconectando: loggedOut=${loggedOut}, botAtivo=${empresaAtualizada?.botAtivo}`);
+
+      // se realmente foi logout, aí sim marca como desconectado permanente
+      statusBots[empresa._id] = { conectado: false, ultimaAtualizacao: new Date() };
     }
+  }
+
+  if (connection === 'open') {
+    statusBots[empresa._id] = { conectado: true, ultimaAtualizacao: new Date() };
+    console.log(`🤖 Conectado com sucesso: ${empresa.nome}`);
+  }
+
   });
 
   const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
