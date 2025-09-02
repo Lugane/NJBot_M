@@ -556,6 +556,19 @@ const EmpresasList = () => {
   const [loadingEmpresa, setLoadingEmpresa] = useState(null);
   const [expandedPrompts, setExpandedPrompts] = useState({}); // controla "ver mais/menos"
 
+  const [statusBots, setStatusBots] = useState({});
+
+  useEffect(() => {
+    async function fetchStatus() {
+      const res = await fetch("/api/bots/status");
+      const data = await res.json();
+      setStatusBots(data);
+    }
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     const fetchEmpresas = async () => {
       try {
@@ -735,6 +748,15 @@ const EmpresasList = () => {
                 />
                 Bot ativo
               </Label>
+
+                <Paragraph>
+                Status:{" "}
+                {status?.conectado ? (
+                  <span style={{ color: "green", fontWeight: "bold" }}>🟢 Conectado</span>
+                ) : (
+                  <span style={{ color: "red", fontWeight: "bold" }}>🔴 Desconectado</span>
+                )}
+              </Paragraph>
               <Button
                 onClick={() => gerarNovoQrCode(empresa._id, empresa.nome)}
                 disabled={loadingEmpresa === empresa._id}

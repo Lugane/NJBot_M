@@ -10,6 +10,8 @@ require('dotenv').config();
 const Empresa = require('./models/Empresa');
 const botManager = require('./botManager');
 
+const { statusBots } = require('./botManager');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -192,6 +194,10 @@ app.put('/api/empresas/:id/toggle-bot', async (req, res) => {
     console.error('Erro ao alternar bot:', error);
     res.status(500).json({ message: 'Erro ao alternar bot' });
   }
+});
+
+app.get('/api/bots/status', (req, res) => {
+  res.json(statusBots);
 });
 
 app.get('/', (req, res) => {
