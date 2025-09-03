@@ -171,7 +171,7 @@ async function iniciarBot(empresa) {
         atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
 
         await sock.sendMessage(sender, {
-          text: `Olá! 👋 Bem-vindo(a) à ${empresaAtualizada.nome}! Como posso te ajudar? Se quiser falar com um atendente humano, digite "atendente" ou "humano".`
+          text: `Olá! 👋 Bem-vindo(a) à ${empresaAtualizada.nome}! Como posso te ajudar?`
         });
         return;
       }

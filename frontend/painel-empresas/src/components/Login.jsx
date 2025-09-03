@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import styled from 'styled-components';
 import { login } from '../services/loginService';
-import logo from "../img/NJBot_original.jpg";
+// import logo from "../img/NJBot_original.jpg";
 
 const Container = styled.div`
   display: flex;
@@ -38,6 +38,7 @@ const Input = styled.input`
   border-radius: 8px;
   font-size: 1rem;
   background: #e0e1dd;
+  margin-top: 10px;
 `;
 
 const Button = styled.button`
@@ -71,6 +72,25 @@ const Img = styled.img`
   align-self: center;
 `;
 
+const NJBot = styled.div`
+  font-size: 1.5rem;
+  font-weight: 500;
+  display: flex;
+  gap: 0;
+  background-color: #2523236c;
+  max-width: 20%;
+  padding: 3px;
+  border-radius: 5px;
+  margin: auto;
+
+`
+
+const Letter = styled.span`
+  color: ${props => props.color};
+  animation: ${props => props.animate ? colorShift : 'none'} 7s infinite ease-in-out;
+  font-family: 'Montserrat', sans-serif;
+`
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
@@ -89,7 +109,14 @@ export default function Login() {
   return (
     <Container>
       <Form onSubmit={handleLogin}>
-        <Img src={logo} alt="" />
+        {/* <Img src={logo} alt="" /> */}
+        <NJBot>
+          <Letter color="#1754ec">N</Letter>
+          <Letter color="#3163e4ff">J</Letter>
+          <Letter color="#C3263B">B</Letter>
+          <Letter color="#C3263B">ot</Letter>
+        </NJBot>
+        
         <Input
           type="email"
           value={email}
