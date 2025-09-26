@@ -390,7 +390,7 @@ const EmpresasList = () => {
                 <PromptContent expanded={expandedPrompts[empresa._id]}>
                   {empresa.promptIA}
                 </PromptContent>
-                {empresa.promptIA.split('\n').length > 5 || empresa.promptIA.length > 200 ? (
+                {(empresa.promptIA?.split('\n')?.length > 5 || empresa.promptIA?.length > 200) ? (
                   <ToggleButton onClick={() => togglePrompt(empresa._id)}>
                     {expandedPrompts[empresa._id] ? 'Ver menos ▲' : 'Ver mais ▼'}
                   </ToggleButton>
