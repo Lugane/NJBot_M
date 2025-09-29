@@ -17,6 +17,7 @@
     "bcryptjs": "^3.0.2",
     "ffi-napi": "^4.0.3",
     "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.18.2",
     "openai": "^5.11.0",
     "stream-buffers": "^3.0.3",
     "vosk": "^0.3.39",
