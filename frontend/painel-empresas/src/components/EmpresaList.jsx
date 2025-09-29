@@ -713,4 +713,7 @@ const EmpresasList = ({ empresas: propEmpresas, setEmpresas: setPropEmpresas }) 
 
 export default EmpresasList;
 
+<<<<<<< Updated upstream
 // Mudanças feitas para mudar dinamicamente a lista de empresa após o form e definir o ID para manipulação, tirando a dependência do nome.
+=======
+>>>>>>> Stashed changes
