@@ -10,109 +10,61 @@ const qrCodesGerados = {}; // { nomeEmpresa: base64QR }
 
 const statusBots = {}; // { nomeEmpresa: { conectado: boolean, ultimaAtualizacao: Date } }
 
-// async function iniciarBot(empresa) {
-//   const pasta = path.join(__dirname, 'bots', empresa.nome, 'auth_info_baileys');
-//   if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
-
-//   const { state, saveCreds } = await useMultiFileAuthState(pasta);
-//   const sock = makeWASocket({ auth: state });
-
-//   let resolveQRCode;
-//   const qrCodePromise = new Promise(resolve => { resolveQRCode = resolve; });
-
-//   sock.ev.on('creds.update', saveCreds);
-
-//   sock.ev.on('connection.update', async (update) => {
-//     const { connection, lastDisconnect, qr } = update;
-
-//     if (qr) {
-//       qrCodesGerados[empresa.nome] = await qrcode.toDataURL(qr);
-//       resolveQRCode(qr);
-//     }
-    
-//     if (connection === 'close') {
-//     const statusCode = lastDisconnect?.error?.output?.statusCode;
-
-//     const loggedOut = statusCode === DisconnectReason.loggedOut;
-
-//     const empresaAtualizada = await empresaDB.findById(empresa._id);
-
-//     if (!loggedOut && empresaAtualizada?.botAtivo) {
-//       console.log(`[RECONNECT] Reconectando bot de ${empresaAtualizada.nome}...`);
-//       iniciarBot(empresaAtualizada);
-
-//       // enquanto reconecta, marca como desconectado temporário
-//       statusBots[empresa._id] = { conectado: false, ultimaAtualizacao: new Date() };
-//     } else {
-//       console.log(`[RECONNECT] Não reconectando: loggedOut=${loggedOut}, botAtivo=${empresaAtualizada?.botAtivo}`);
-
-//       // se realmente foi logout, aí sim marca como desconectado permanente
-//       statusBots[empresa._id] = { conectado: false, ultimaAtualizacao: new Date() };
-//     }
-//   }
-
-//   if (connection === 'open') {
-//     statusBots[empresa._id] = { conectado: true, ultimaAtualizacao: new Date() };
-//     console.log(`🤖 Conectado com sucesso: ${empresa.nome}`);
-//   }
-
-//   });
-
 async function iniciarBot(empresa) {
   const pasta = path.join(__dirname, 'bots', empresa.nome, 'auth_info_baileys');
-  if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
+  if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
 
-  const { state, saveCreds } = await useMultiFileAuthState(pasta);
-  const sock = makeWASocket({ auth: state });
+  const { state, saveCreds } = await useMultiFileAuthState(pasta);
+  const sock = makeWASocket({ auth: state });
 
-  let resolveQRCode;
-  const qrCodePromise = new Promise(resolve => { resolveQRCode = resolve; });
+  let resolveQRCode;
+  const qrCodePromise = new Promise(resolve => { resolveQRCode = resolve; });
 
-  sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update;
 
-    if (qr) {
-      qrCodesGerados[empresa.nome] = await qrcode.toDataURL(qr);
-      resolveQRCode(qr);
-    }
-    
-    if (connection === 'close') {
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const loggedOut = statusCode === DisconnectReason.loggedOut;
-      const empresaAtualizada = await empresaDB.findById(empresa._id);
+    if (qr) {
+      qrCodesGerados[empresa.nome] = await qrcode.toDataURL(qr);
+      resolveQRCode(qr);
+    }
+    
+    if (connection === 'close') {
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const loggedOut = statusCode === DisconnectReason.loggedOut;
+      const empresaAtualizada = await empresaDB.findById(empresa._id);
 
-      // >>> NOVO: Limpa o QR Code do cache caso a conexão caia
-      if(qrCodesGerados[empresa.nome]) {
-          delete qrCodesGerados[empresa.nome];
-      }
+      // Limpa o QR Code do cache caso a conexão caia
+      if(qrCodesGerados[empresa.nome]) {
+          delete qrCodesGerados[empresa.nome];
+      }
 
-      if (!loggedOut && empresaAtualizada?.botAtivo) {
-        console.log(`[RECONNECT] Reconectando bot de ${empresaAtualizada.nome}...`);
-        iniciarBot(empresaAtualizada);
+      if (!loggedOut && empresaAtualizada?.botAtivo) {
+        console.log(`[RECONNECT] Reconectando bot de ${empresaAtualizada.nome}...`);
+        iniciarBot(empresaAtualizada);
 
-        // enquanto reconecta, marca como desconectado temporário
-        statusBots[empresa._id] = { conectado: false, ultimaAtualizacao: new Date() };
-      } else {
-        console.log(`[RECONNECT] Não reconectando: loggedOut=${loggedOut}, botAtivo=${empresaAtualizada?.botAtivo}`);
+        // >>> REMOVIDO: A linha statusBots[empresa._id] = { conectado: false, ... }
+        // é removida aqui. O status permanece o último conhecido até reconectar.
+      } else {
+        console.log(`[RECONNECT] Não reconectando: loggedOut=${loggedOut}, botAtivo=${empresaAtualizada?.botAtivo}`);
 
-        // se realmente foi logout, aí sim marca como desconectado permanente
-        statusBots[empresa._id] = { conectado: false, ultimaAtualizacao: new Date() };
-      }
-    }
+        // MANTIDO: Se realmente foi logout, aí sim marca como desconectado permanente
+        statusBots[empresa._id] = { conectado: false, ultimaAtualizacao: new Date() };
+      }
+    }
 
-    if (connection === 'open') {
-      statusBots[empresa._id] = { conectado: true, ultimaAtualizacao: new Date() };
-      console.log(`🤖 Conectado com sucesso: ${empresa.nome}`);
-      
-      // >>> NOVO: Limpa o QR Code do cache quando a conexão é estabelecida - new feature
-      if (qrCodesGerados[empresa.nome]) {
-        delete qrCodesGerados[empresa.nome];
-        console.log(`[QR CODE] QR Code de ${empresa.nome} limpo após conexão.`);
-      }
-    }
-  });
+    if (connection === 'open') {
+      statusBots[empresa._id] = { conectado: true, ultimaAtualizacao: new Date() };
+      console.log(`🤖 Conectado com sucesso: ${empresa.nome}`);
+      
+      // Limpa o QR Code do cache quando a conexão é estabelecida
+      if (qrCodesGerados[empresa.nome]) {
+        delete qrCodesGerados[empresa.nome];
+        console.log(`[QR CODE] QR Code de ${empresa.nome} limpo após conexão.`);
+      }
+    }
+  });
 
   const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
   const { WritableStreamBuffer } = require('stream-buffers');
@@ -360,6 +312,3 @@ module.exports = {
   deletarEmpresa,
   statusBots
 };
-
-// Estruturei para apagar o Qrcode após a conexão ser estabelecida,
-// e também para apagar o Qrcode caso a conexão caia (antes de tentar reconectar).
