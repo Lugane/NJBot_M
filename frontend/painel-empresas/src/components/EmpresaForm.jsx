@@ -191,9 +191,140 @@ const CampoPrompt = styled(TextArea)`
   flex: 2;
 `;
 
+// const NovaEmpresa = () => {
+//   const [nome, setNome] = useState('');
+//   const [telefone, setTelefone] = useState('');
+//   const [ativo, setAtivo] = useState(true);
+//   const [promptIA, setPromptIA] = useState('');
+//   const [qrCode, setQrCode] = useState(null);
+//   const [loading, setLoading] = useState(false);
+//   const [erro, setErro] = useState('');
+//   const [aguardandoQR, setAguardandoQR] = useState(false);
+
+//   const handleSubmit = async (e) => {
+//     e.preventDefault();
+//     setLoading(true);
+//     setErro('');
+//     setQrCode(null);
+//     setAguardandoQR(false);
+
+//     if (!promptIA.trim()) {
+//       setErro('O prompt da IA é obrigatório.');
+//       setLoading(false);
+//       return;
+//     }
+
+//     const payload = {
+//       nome,
+//       telefone,
+//       ativo,
+//       setores: [],
+//       promptIA: promptIA.trim()
+//     };
+
+//     try {
+//       const response = await fetch('http://localhost:3000/api/empresas', {
+//         method: 'POST',
+//         headers: { 'Content-Type': 'application/json' },
+//         body: JSON.stringify(payload),
+//       });
+//       const data = await response.json();
+
+//       if (!response.ok) {
+//         setErro(data.error || 'Erro ao cadastrar empresa');
+//       } else if (data.qrCode) {
+//         setQrCode(data.qrCode);
+//       } else {
+//         setAguardandoQR(true);
+//       }
+//     } catch (err) {
+//       console.error(err);
+//       setErro('Erro na conexão com o servidor.');
+//     } finally {
+//       setLoading(false);
+//     }
+//   };
+
+//   useEffect(() => {
+//     let intervalo;
+//     if (aguardandoQR && nome) {
+//       intervalo = setInterval(async () => {
+//         try {
+//           const res = await fetch(`http://localhost:3000/api/qr/${nome}`);
+//           if (res.ok) {
+//             const data = await res.json();
+//             if (data.qrCode) {
+//               setQrCode(data.qrCode);
+//               setAguardandoQR(false);
+//               clearInterval(intervalo);
+//             }
+//           }
+//         } catch (err) {
+//           console.error('Erro ao buscar QR Code:', err);
+//         }
+//       }, 5000);
+//     }
+//     return () => clearInterval(intervalo);
+//   }, [aguardandoQR, nome]);
+
+//   return (
+//     <Container>
+//       <Title>Cadastrar Empresa:</Title>
+//       <Form onSubmit={handleSubmit}>
+//         <Input
+//           type="text"
+//           placeholder="Nome da Empresa:"
+//           value={nome}
+//           onChange={(e) => setNome(e.target.value)}
+//           required
+//         />
+
+//         <Input
+//           type="text"
+//           placeholder="Número do WhatsApp:"
+//           value={telefone}
+//           onChange={(e) => setTelefone(e.target.value)}
+//           required
+//         />
+
+//         <TextArea
+//           placeholder="Prompt da IA:"
+//           value={promptIA}
+//           onChange={(e) => setPromptIA(e.target.value)}
+//           required
+//         />
+
+//         <Label>
+//           <input
+//             type="checkbox"
+//             checked={ativo}
+//             onChange={(e) => setAtivo(e.target.checked)}
+//           />
+//           Bot Ativo
+//         </Label>
+
+//         <Button type="submit" disabled={loading}>
+//           {loading ? 'Cadastrando...' : 'Cadastrar e gerar QR Code'}
+//         </Button>
+//       </Form>
+
+//       {erro && <MessageError>{erro}</MessageError>}
+//       {aguardandoQR && <MessageInfo>Aguardando geração do QR Code...</MessageInfo>}
+
+//       {qrCode && (
+//         <QRCodeContainer>
+//           <h3>QR Code do WhatsApp</h3>
+//           <img src={qrCode} alt="QR Code do WhatsApp" />
+//         </QRCodeContainer>
+//       )}
+//     </Container>
+//   );
+// };
+
+// export default NovaEmpresa;
 
 
-const NovaEmpresa = () => {
+const NovaEmpresa = ({ onSuccess }) => { 
   const [nome, setNome] = useState('');
   const [telefone, setTelefone] = useState('');
   const [ativo, setAtivo] = useState(true);
@@ -202,6 +333,19 @@ const NovaEmpresa = () => {
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState('');
   const [aguardandoQR, setAguardandoQR] = useState(false);
+  const [empresaId, setEmpresaId] = useState(null); // <<< NOVO ESTADO
+
+  // Máscara de telefone (XX) XXXXX-XXXX) - new feature
+  const handleTelefoneChange = (e) => {
+    let value = e.target.value.replace(/\D/g, '');
+    let formattedValue = '';
+
+    if (value.length > 0) formattedValue = '(' + value.substring(0, 2);
+    if (value.length >= 3) formattedValue += ') ' + value.substring(2, 7);
+    if (value.length >= 8) formattedValue += '-' + value.substring(7, 11);
+
+    setTelefone(formattedValue);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -209,6 +353,7 @@ const NovaEmpresa = () => {
     setErro('');
     setQrCode(null);
     setAguardandoQR(false);
+    setEmpresaId(null); // Reset ID
 
     if (!promptIA.trim()) {
       setErro('O prompt da IA é obrigatório.');
@@ -218,7 +363,8 @@ const NovaEmpresa = () => {
 
     const payload = {
       nome,
-      telefone,
+      // Envia o telefone limpo (somente números)
+      telefone: telefone.replace(/\D/g, ''), 
       ativo,
       setores: [],
       promptIA: promptIA.trim()
@@ -234,10 +380,19 @@ const NovaEmpresa = () => {
 
       if (!response.ok) {
         setErro(data.error || 'Erro ao cadastrar empresa');
-      } else if (data.qrCode) {
-        setQrCode(data.qrCode);
       } else {
-        setAguardandoQR(true);
+        // Envia a nova empresa para o componente List
+        if (onSuccess) {
+            onSuccess(data.empresa); 
+        }
+
+        setEmpresaId(data.empresa._id); // Define o ID para o polling
+
+        if (data.qrCode) {
+          setQrCode(data.qrCode);
+        } else {
+          setAguardandoQR(true);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -249,16 +404,30 @@ const NovaEmpresa = () => {
 
   useEffect(() => {
     let intervalo;
-    if (aguardandoQR && nome) {
+    // Polling agora usa o empresaId
+    if (aguardandoQR && empresaId) { 
       intervalo = setInterval(async () => {
         try {
-          const res = await fetch(`http://localhost:3000/api/qr/${nome}`);
+          // Busca o QR Code usando o ID da empresa
+          const res = await fetch(`http://localhost:3000/api/qr/${empresaId}`); 
+          
           if (res.ok) {
             const data = await res.json();
-            if (data.qrCode) {
+            
+            // Se o QR Code vier nulo (foi limpo no backend após a conexão)
+            if (!data.qrCode) {
+                setQrCode(null);
+                setAguardandoQR(false);
+                clearInterval(intervalo);
+                
+                // Limpar formulário após sucesso de conexão
+                setNome('');
+                setTelefone('');
+                setPromptIA('');
+                setEmpresaId(null);
+
+            } else {
               setQrCode(data.qrCode);
-              setAguardandoQR(false);
-              clearInterval(intervalo);
             }
           }
         } catch (err) {
@@ -266,8 +435,9 @@ const NovaEmpresa = () => {
         }
       }, 5000);
     }
+    // Limpa o intervalo no cleanup ou quando as condições mudam
     return () => clearInterval(intervalo);
-  }, [aguardandoQR, nome]);
+  }, [aguardandoQR, empresaId]);
 
   return (
     <Container>
@@ -283,9 +453,10 @@ const NovaEmpresa = () => {
 
         <Input
           type="text"
-          placeholder="Número do WhatsApp:"
+          placeholder="Número do WhatsApp: (XX) XXXXX-XXXX"
           value={telefone}
-          onChange={(e) => setTelefone(e.target.value)}
+          onChange={handleTelefoneChange} // <<< Uso da função de máscara
+          maxLength="15"
           required
         />
 
@@ -311,7 +482,8 @@ const NovaEmpresa = () => {
       </Form>
 
       {erro && <MessageError>{erro}</MessageError>}
-      {aguardandoQR && <MessageInfo>Aguardando geração do QR Code...</MessageInfo>}
+      {/* Exibir mensagem se estiver aguardando QR Code, ou se o QR Code foi gerado mas ainda não conectado */}
+      {(aguardandoQR || (qrCode && empresaId)) && <MessageInfo>Aguardando conexão do WhatsApp...</MessageInfo>}
 
       {qrCode && (
         <QRCodeContainer>
@@ -324,3 +496,7 @@ const NovaEmpresa = () => {
 };
 
 export default NovaEmpresa;
+
+
+// Adicionei o estado empresaId e refatorei o useEffect para usar o ID no polling do QR Code. 
+// O componente agora aceita um prop onSuccess para notificar o componente pai sobre a nova empresa.

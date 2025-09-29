@@ -49,22 +49,41 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.post('/api/empresas', async (req, res) => {
-  const { nome, promptIA, telefone, ativo } = req.body;
-  try {
-    const empresaExistente = await Empresa.findOne({ nome });
-    if (empresaExistente) return res.status(400).json({ error: 'Empresa já existe.' });
+  // const { nome, promptIA, telefone, ativo } = req.body;
+  // try {
+  //   const empresaExistente = await Empresa.findOne({ nome });
+  //   if (empresaExistente) return res.status(400).json({ error: 'Empresa já existe.' });
 
-    const novaEmpresa = new Empresa({ nome, promptIA, telefone, botAtivo: ativo });
-    await novaEmpresa.save();
+  //   const novaEmpresa = new Empresa({ nome, promptIA, telefone, botAtivo: ativo });
+  //   await novaEmpresa.save();
 
-    const pasta = path.join(__dirname, 'bots', nome);
-    if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
-    fs.writeFileSync(path.join(pasta, 'prompt.txt'), promptIA);
+  //   const pasta = path.join(__dirname, 'bots', nome);
+  //   if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
+  //   fs.writeFileSync(path.join(pasta, 'prompt.txt'), promptIA);
 
-    // Inicia o bot via botManager e retorna QR
-    const qrCode = await botManager.iniciarBot(novaEmpresa);
+  //   // Inicia o bot via botManager e retorna QR
+  //   const qrCode = await botManager.iniciarBot(novaEmpresa);
 
-    return res.json({ qrCode });
+  //   return res.json({ qrCode });
+
+    const { nome, promptIA, telefone, ativo } = req.body;
+    try {
+      const empresaExistente = await Empresa.findOne({ nome });
+      if (empresaExistente) return res.status(400).json({ error: 'Empresa já existe.' });
+
+      const novaEmpresa = new Empresa({ nome, promptIA, telefone, botAtivo: ativo });
+      await novaEmpresa.save(); // Salva para ter o _id
+
+      const pasta = path.join(__dirname, 'bots', nome);
+      if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
+      fs.writeFileSync(path.join(pasta, 'prompt.txt'), promptIA);
+
+      // Inicia o bot via botManager e retorna QR
+      const qrCode = await botManager.iniciarBot(novaEmpresa);
+
+      // >>> AJUSTE AQUI: Retorna a empresa salva junto com o QR Code - new feature
+      return res.json({ qrCode, empresa: novaEmpresa });
+
   } catch (err) {
     console.error('❌ Erro ao cadastrar empresa:', err);
     return res.status(500).json({ error: 'Erro ao cadastrar empresa.' });
@@ -217,3 +236,5 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Backend rodando em http://localhost:${PORT}`);
 });
+
+// Estamos salvando o id do bot na coleção Empresa para usarmos o id para manipulação
