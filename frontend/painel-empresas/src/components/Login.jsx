@@ -109,7 +109,6 @@ export default function Login() {
   return (
     <Container>
       <Form onSubmit={handleLogin}>
-        {/* <Img src={logo} alt="" /> */}
         <NJBot>
           <Letter color="#1754ec">N</Letter>
           <Letter color="#3163e4ff">J</Letter>
