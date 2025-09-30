@@ -70,6 +70,11 @@ async function iniciarBot(empresa) {
 
       const sender = msg.key.remoteJid;
 
+      // ==== CÓDIGO PARA FORMATAR COMO TELEFONE BR ====
+      const telefone = sender.replace('@s.whatsapp.net', '');
+      const telefoneFormatado = `+${telefone.substring(0, 2)} ${telefone.substring(2, 4)} ${telefone.substring(4, 8)}-${telefone.substring(8)}`;
+      console.log(`📱 TELEFONE: ${telefoneFormatado}`);
+
       // Extrai texto das mensagens
       let texto =
         msg.message?.conversation ||

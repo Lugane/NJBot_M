@@ -40,23 +40,11 @@ async function handleMensagem(empresaId, mensagemUsuario, sender = null) {
 async function processarComandoPesquisa(mensagem, sender) {
   const texto = mensagem.toLowerCase().trim();
   
-  // TODAS AS PALAVRAS-CHAVE QUE ATIVAM A NAVEGAÇÃO:
+  // PALAVRAS-CHAVE QUE ATIVAM A NAVEGAÇÃO:
   const palavrasPesquisa = [
-    // Pesquisa básica
-    // 'pesquisar', 'pesquise', 'buscar', 'procure', 'encontre', 'ache',
-    // 'search', 'find', 'lookup',
-    
-    // Navegadores/sites
-    'google', 'navegador', 'chrome', 'internet', 'web', 'site',
-    'safari', 'firefox', 'edge', 'explorer',
-    
-    // Ações de navegação
-    // 'abrir', 'acessar', 'navegar', 'visitar', 'ir para', 'vá para',
-    // 'mostrar', 'ver', 'exibir', 'mostre', 'veja',
-    
-    // Tipos de conteúdo
-    // 'site', 'página', 'página web', 'website', 'endereço', 'url',
-    // 'link', 'online', 'na web'
+    'pesquisar', 'pesquise', 'buscar', 'procure', 'encontre', 'ache',
+    'search', 'google', 'navegador', 'chrome', 'internet', 'web', 'site',
+    'rhid', 'login', 'acessar', 'entrar', 'sistema', 'portal'
   ];
   
   const devePesquisar = palavrasPesquisa.some(palavra => texto.includes(palavra));
@@ -68,26 +56,56 @@ async function processarComandoPesquisa(mensagem, sender) {
   // Extrai o termo de pesquisa
   let query = extrairQueryDePesquisa(mensagem, palavrasPesquisa);
   
-  if (!query) {
+  // Extrai o telefone do sender para RHID
+  const telefone = sender ? sender.replace('@s.whatsapp.net', '') : null;
+  const telefoneFormatado = telefone ? `+${telefone.substring(0, 2)} ${telefone.substring(2, 4)} ${telefone.substring(4, 8)}-${telefone.substring(8)}` : 'N/A';
+  
+  console.log(`📱 Telefone detectado: ${telefoneFormatado}`);
+  
+  if (!query && !texto.includes('rhid') && !texto.includes('login')) {
     return { 
       deveResponder: true, 
-      resposta: '🔍 Por favor, especifique o que você gostaria que eu pesquise.\n\nExemplo: "pesquisar receitas de bolo" ou "abrir site do YouTube"' 
+      resposta: '🔍 Por favor, especifique o que você gostaria que eu pesquise.\n\nExemplo: "pesquisar receitas de bolo" ou "rhid login"' 
     };
   }
   
   console.log(`🔍 Query extraída: "${query}"`);
   
   try {
-    console.log(`🔍 Iniciando pesquisa no Chrome VISUAL para: "${query}"`);
+    console.log(`🔍 Iniciando navegação para: "${query || 'RHID'}"`);
     
-    // Executa a pesquisa em segundo plano - COM CHROME VISUAL
+    // Executa a pesquisa em segundo plano passando o telefone
     if (searchInChrome) {
-      executarPesquisaEmSegundoPlano(query, sender, false); // false = Chrome VISUAL
+      executarPesquisaEmSegundoPlano(query || 'rhid login', sender, false, telefone);
+    }
+    
+    // Para RHID, busca credenciais
+    let resposta = `🔍 **Abrindo Navegador:**\n\n`;
+    
+    if (texto.includes('rhid') || texto.includes('login')) {
+      const { getCredenciaisRHID } = require('../rhidLogins');
+      const credenciais = telefone ? getCredenciaisRHID(telefone) : null;
+      
+      resposta += `📱 Baseado no telefone: ${telefoneFormatado}\n\n`;
+      
+      if (credenciais) {
+        resposta += `✅ **Credenciais encontradas!**\n`;
+        resposta += `👤 Usuário: ${credenciais.usuario}\n`;
+        resposta += `🔒 Senha: ${'*'.repeat(credenciais.senha.length)}\n\n`;
+        resposta += `🔄 **Login automático ativado!**\n`;
+        resposta += `O sistema vai preencher automaticamente os campos de login.`;
+      } else {
+        resposta += `⚠️ **Credenciais não encontradas**\n`;
+        resposta += `Entre em contato com o administrador para cadastrar seu telefone.`;
+      }
+    } else {
+      resposta += `🌐 Pesquisando: "${query}"\n\n`;
+      resposta += `📝 Estou abrindo o navegador com sua pesquisa...`;
     }
     
     return { 
       deveResponder: true, 
-      resposta: `🔍 **Abrindo Chrome VISUAL:**\n"${query}"\n\n📝 Estou abrindo o navegador e buscando as informações para você...\n\n_Verifique a tela do computador!_` 
+      resposta: resposta
     };
     
   } catch (error) {
@@ -124,21 +142,24 @@ function extrairQueryDePesquisa(mensagem, palavrasPesquisa) {
   return query;
 }
 
-// Função atualizada com parâmetro headless
-async function executarPesquisaEmSegundoPlano(query, sender, headless = false) {
+// Função para executar pesquisa
+async function executarPesquisaEmSegundoPlano(query, sender, headless = false, telefone = null) {
   try {
-    const resultado = await searchInChrome(query, headless);
+    const resultado = await searchInChrome(query, headless, telefone);
     
     if (resultado.success) {
-      console.log(`✅ Pesquisa no Chrome VISUAL concluída: ${resultado.title}`);
-      console.log(`📋 Resultado:\nTítulo: ${resultado.title}\nURL: ${resultado.url}`);
+      console.log(`✅ Navegação concluída para: ${telefone || 'N/A'}`);
+      if (resultado.credenciais) {
+        console.log(`🔑 Credenciais carregadas: ${resultado.credenciais.usuario}`);
+      }
     } else {
-      console.error(`❌ Falha na pesquisa: ${resultado.error}`);
+      console.error(`❌ Falha na navegação: ${resultado.error}`);
     }
     
   } catch (error) {
-    console.error('❌ Erro na pesquisa em segundo plano:', error);
+    console.error('❌ Erro na navegação em segundo plano:', error);
   }
 }
 
+// EXPORTE CORRETO - SEM PARÊNTESES, SEM CHAVES
 module.exports = handleMensagem;
