@@ -18,8 +18,8 @@ async function searchInChrome(query, headless = false) {
       
       // Fecha outras instâncias do Chrome primeiro (opcional)
       try {
-        await execAsync('taskkill /F /IM chrome.exe', { timeout: 3000 });
-        console.log('🔒 Fechando outras instâncias do Chrome...');
+       // await execAsync('taskkill /F /IM chrome.exe', { timeout: 3000 });
+       //console.log('🔒 Fechando outras instâncias do Chrome...');
         await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (killError) {
         console.log('ℹ️ Nenhum Chrome aberto ou não foi possível fechar');
