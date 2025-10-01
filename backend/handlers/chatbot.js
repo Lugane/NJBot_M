@@ -56,11 +56,15 @@ async function processarComandoPesquisa(mensagem, sender) {
   // Extrai o termo de pesquisa
   let query = extrairQueryDePesquisa(mensagem, palavrasPesquisa);
   
-  // Extrai o telefone do sender para RHID
+  // CORREÇÃO: Extrai o telefone LIMPO do sender para RHID
   const telefone = sender ? sender.replace('@s.whatsapp.net', '') : null;
+  const telefoneLimpo = telefone ? telefone.replace(/\D/g, '') : null; // REMOVE TODOS OS NÃO-DÍGITOS
+  
+  // Formata apenas para exibição
   const telefoneFormatado = telefone ? `+${telefone.substring(0, 2)} ${telefone.substring(2, 4)} ${telefone.substring(4, 8)}-${telefone.substring(8)}` : 'N/A';
   
   console.log(`📱 Telefone detectado: ${telefoneFormatado}`);
+  console.log(`🔢 Telefone limpo para busca: ${telefoneLimpo}`);
   
   if (!query && !texto.includes('rhid') && !texto.includes('login')) {
     return { 
@@ -74,9 +78,9 @@ async function processarComandoPesquisa(mensagem, sender) {
   try {
     console.log(`🔍 Iniciando navegação para: "${query || 'RHID'}"`);
     
-    // Executa a pesquisa em segundo plano passando o telefone
+    // CORREÇÃO: Passa o telefone LIMPO para a função de pesquisa
     if (searchInChrome) {
-      executarPesquisaEmSegundoPlano(query || 'rhid login', sender, false, telefone);
+      executarPesquisaEmSegundoPlano(query || 'rhid login', sender, false, telefoneLimpo);
     }
     
     // Para RHID, busca credenciais
@@ -84,7 +88,7 @@ async function processarComandoPesquisa(mensagem, sender) {
     
     if (texto.includes('rhid') || texto.includes('login')) {
       const { getCredenciaisRHID } = require('../rhidLogins');
-      const credenciais = telefone ? getCredenciaisRHID(telefone) : null;
+      const credenciais = telefoneLimpo ? getCredenciaisRHID(telefoneLimpo) : null;
       
       resposta += `📱 Baseado no telefone: ${telefoneFormatado}\n\n`;
       
@@ -96,7 +100,8 @@ async function processarComandoPesquisa(mensagem, sender) {
         resposta += `O sistema vai preencher automaticamente os campos de login.`;
       } else {
         resposta += `⚠️ **Credenciais não encontradas**\n`;
-        resposta += `Entre em contato com o administrador para cadastrar seu telefone.`;
+        resposta += `Entre em contato com o administrador para cadastrar seu telefone.\n`;
+        resposta += `📋 Telefone cadastrado: ${telefoneLimpo}`;
       }
     } else {
       resposta += `🌐 Pesquisando: "${query}"\n\n`;
@@ -148,7 +153,7 @@ async function executarPesquisaEmSegundoPlano(query, sender, headless = false, t
     const resultado = await searchInChrome(query, headless, telefone);
     
     if (resultado.success) {
-      console.log(`✅ Navegação concluída para: ${telefone || 'N/A'}`);
+      console.log(`✅ Navegação concluída para telefone: ${telefone || 'N/A'}`);
       if (resultado.credenciais) {
         console.log(`🔑 Credenciais carregadas: ${resultado.credenciais.usuario}`);
       }
@@ -161,5 +166,4 @@ async function executarPesquisaEmSegundoPlano(query, sender, headless = false, t
   }
 }
 
-// EXPORTE CORRETO - SEM PARÊNTESES, SEM CHAVES
 module.exports = handleMensagem;

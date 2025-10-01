@@ -71,9 +71,20 @@ async function iniciarBot(empresa) {
       const sender = msg.key.remoteJid;
 
       // ==== CÓDIGO PARA FORMATAR COMO TELEFONE BR ====
-      const telefone = sender.replace('@s.whatsapp.net', '');
-      const telefoneFormatado = `+${telefone.substring(0, 2)} ${telefone.substring(2, 4)} ${telefone.substring(4, 8)}-${telefone.substring(8)}`;
-      console.log(`📱 TELEFONE: ${telefoneFormatado}`);
+      // NO chatbot.js - adicione estes logs na função processarComandoPesquisa:
+
+      // CORREÇÃO: Extrai o telefone LIMPO do sender para RHID
+      const telefone = sender ? sender.replace('@s.whatsapp.net', '') : null;
+      const telefoneLimpo = telefone ? telefone.replace(/\D/g, '') : null;
+
+      // ==== ADICIONE ESTES LOGS DE DEBUG ====
+      console.log(`\n🔍 ===== DEBUG COMPLETO DO TELEFONE =====`);
+      console.log(`   - Sender original: ${sender}`);
+      console.log(`   - Telefone extraído: ${telefone}`);
+      console.log(`   - Telefone limpo: ${telefoneLimpo}`);
+      console.log(`   - É o número 3748? ${telefoneLimpo === '555192013748'}`);
+      console.log(`   - É o número 1426? ${telefoneLimpo === '555181681426'}`);
+      console.log(`==========================================\n`);
 
       // Extrai texto das mensagens
       let texto =
