@@ -102,7 +102,7 @@ async function processarImagemREP(mediaBuffer, sender) {
       
       // Executa navegação em segundo plano
       if (searchInChrome) {
-        executarNavegacaoRHID(sender, telefoneLimpo);
+        executarNavegacaoRHID(sender, telefoneLimpo, resultadoOCR.dadosREP);
       }
       
       // ✅ RESPOSTA NO FORMATO EXATO DAS IMAGENS
@@ -173,13 +173,52 @@ async function continuarFluxoREP(mensagem, sender) {
   return { deveResponder: false };
 }
 
-// ✅ FUNÇÃO PARA EXECUTAR NAVEGAÇÃO RHID
-async function executarNavegacaoRHID(sender, telefoneLimpo) {
+// ✅ FUNÇÃO PARA ENVIAR MENSAGEM VIA WHATSAPP
+async function enviarMensagemWhatsApp(sender, mensagem) {
+  try {
+    // Aqui você precisa usar a função do seu bot para enviar mensagens
+    // Esta é a integração com o seu sistema de WhatsApp
+    console.log(`📤 Enviando mensagem para ${sender}: ${mensagem}`);
+    
+    // EXEMPLO - substitua pela sua função real de envio de mensagens
+    // await bot.sendMessage(sender, mensagem);
+    
+    // Se você tem uma função global para enviar mensagens, use-a:
+    // global.bot.sendMessage(sender, mensagem);
+    
+    return true;
+  } catch (error) {
+    console.error('❌ Erro ao enviar mensagem WhatsApp:', error);
+    return false;
+  }
+}
+
+// ✅ FUNÇÃO PARA EXECUTAR NAVEGAÇÃO RHID - VERSÃO COM CALLBACK
+async function executarNavegacaoRHID(sender, telefoneLimpo, dadosREP) {
   try {
     if (searchInChrome) {
       console.log(`🌐 Iniciando navegação RHID para: ${telefoneLimpo}`);
-      await searchInChrome('desbloqueio rep', false, telefoneLimpo);
-      console.log('✅ Navegação RHID concluída');
+      console.log(`📋 Enviando dados do REP:`, dadosREP);
+      
+      // ✅ FUNÇÃO CALLBACK PARA ENVIAR RESULTADO VIA WHATSAPP
+      const callbackResultado = async (mensagem) => {
+        try {
+          console.log(`📤 Tentando enviar resultado via WhatsApp: ${mensagem}`);
+          const enviado = await enviarMensagemWhatsApp(sender, mensagem);
+          if (enviado) {
+            console.log('✅ Resultado enviado com sucesso via WhatsApp!');
+          } else {
+            console.log('❌ Falha ao enviar resultado via WhatsApp');
+          }
+        } catch (error) {
+          console.error('❌ Erro no callback WhatsApp:', error);
+        }
+      };
+      
+      // ✅ AGORA ENVIA OS DADOS DO REP E O CALLBACK
+      await searchInChrome('desbloqueio rep', false, telefoneLimpo, dadosREP, callbackResultado);
+      
+      console.log('✅ Navegação RHID concluída!');
     }
   } catch (error) {
     console.error('❌ Erro na navegação RHID:', error);

@@ -12,9 +12,11 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@google-cloud/vision": "^5.3.3",
     "@google/generative-ai": "^0.24.1",
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "^7.0.0-rc.4",
+    "axios": "^1.12.2",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
@@ -25,6 +27,7 @@
     "puppeteer": "^24.22.3",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
+    "sharp": "^0.34.4",
     "tesseract.js": "^6.0.1"
   },
   "devDependencies": {
