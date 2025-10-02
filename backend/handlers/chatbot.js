@@ -1,29 +1,43 @@
 // backend/handlers/chatbot.js
 const Empresa = require('../models/Empresa');
 const { gerarRespostaGemini } = require('../gemini');
+const { processarImagemOCR, gerarRespostaOCR } = require('./ocrHandler');
 
 // Importação condicional para evitar erro de módulo
 let searchInChrome;
 try {
-  const chromeModule = require('../chromeAutomation');
+  const chromeModule = require('../DesbloqueioREP');
   searchInChrome = chromeModule.searchInChrome;
 } catch (error) {
-  console.log('⚠️ Módulo chromeAutomation não encontrado, funcionalidade de pesquisa desativada');
+  console.log('⚠️ Módulo DesbloqueioREP não encontrado, funcionalidade de pesquisa desativada');
   searchInChrome = null;
 }
 
-async function handleMensagem(empresaId, mensagemUsuario, sender = null) {
+// Variável para controlar estado da conversa
+const usuariosEmFluxoREP = new Map();
+
+async function handleMensagem(empresaId, mensagemUsuario, sender = null, isMedia = false, mediaBuffer = null) {
   try {
     const empresa = await Empresa.findById(empresaId);
     if (!empresa) return { resposta: '⚠️ Empresa não encontrada.' };
 
-    // Primeiro verifica se é um comando de pesquisa
-    const resultadoPesquisa = await processarComandoPesquisa(mensagemUsuario, sender);
-    if (resultadoPesquisa.deveResponder) {
-      return { resposta: resultadoPesquisa.resposta };
+    // ✅ 1. PRIMEIRO: Verifica se é uma IMAGEM do REP
+    if (isMedia && mediaBuffer) {
+      return await processarImagemREP(mediaBuffer, sender);
     }
 
-    // Se não for pesquisa, usa a IA normal
+    // ✅ 2. SEGUNDO: Verifica se usuário está em fluxo ativo
+    if (usuariosEmFluxoREP.has(sender)) {
+      return await continuarFluxoREP(mensagemUsuario, sender);
+    }
+
+    // ✅ 3. TERCEIRO: Verifica se é problema no ponto (ativa fluxo)
+    const resultadoProblemaPonto = await verificarProblemaPonto(mensagemUsuario, sender);
+    if (resultadoProblemaPonto.deveResponder) {
+      return { resposta: resultadoProblemaPonto.resposta };
+    }
+
+    // ✅ 4. QUARTO: Usa IA normal para outras mensagens
     const promptCompleto = `${empresa.promptIA}\nUsuário: ${mensagemUsuario}\nIA:`;
     const respostaIA = await gerarRespostaGemini(promptCompleto, mensagemUsuario);
 
@@ -36,133 +50,153 @@ async function handleMensagem(empresaId, mensagemUsuario, sender = null) {
   }
 }
 
-// Função para processar comandos de pesquisa
-async function processarComandoPesquisa(mensagem, sender) {
+// ✅ FUNÇÃO PARA VERIFICAR PROBLEMAS NO PONTO
+async function verificarProblemaPonto(mensagem, sender) {
   const texto = mensagem.toLowerCase().trim();
   
-  // PALAVRAS-CHAVE QUE ATIVAM A NAVEGAÇÃO:
-  const palavrasPesquisa = [
-    'pesquisar', 'pesquise', 'buscar', 'procure', 'encontre', 'ache',
-    'search', 'google', 'navegador', 'chrome', 'internet', 'web', 'site',
-    'rhid', 'login', 'acessar', 'entrar', 'sistema', 'portal'
+  // PALAVRAS-CHAVE QUE ATIVAM O FLUXO DE PROBLEMAS NO PONTO
+  const palavrasProblemaPonto = [
+    'não acessa', 'ponto não acessa', 'ponto parou', 'ponto bloqueado', 
+    'problema no ponto', 'problema ponto', 'ponto com erro', 'erro no ponto',
+    'rep bloqueado', 'rep não funciona', '1602', '1603', 'desbloquear rep',
+    'rep travado', 'ponto travado'
   ];
   
-  const devePesquisar = palavrasPesquisa.some(palavra => texto.includes(palavra));
+  const deveAtivarFluxo = palavrasProblemaPonto.some(palavra => texto.includes(palavra));
   
-  if (!devePesquisar || !searchInChrome) {
+  if (!deveAtivarFluxo) {
     return { deveResponder: false };
   }
-  
-  // Extrai o termo de pesquisa
-  let query = extrairQueryDePesquisa(mensagem, palavrasPesquisa);
-  
-  // CORREÇÃO: Extrai o telefone LIMPO do sender para RHID
-  const telefone = sender ? sender.replace('@s.whatsapp.net', '') : null;
-  const telefoneLimpo = telefone ? telefone.replace(/\D/g, '') : null; // REMOVE TODOS OS NÃO-DÍGITOS
-  
-  // Formata apenas para exibição
-  const telefoneFormatado = telefone ? `+${telefone.substring(0, 2)} ${telefone.substring(2, 4)} ${telefone.substring(4, 8)}-${telefone.substring(8)}` : 'N/A';
-  
-  console.log(`📱 Telefone detectado: ${telefoneFormatado}`);
-  console.log(`🔢 Telefone limpo para busca: ${telefoneLimpo}`);
-  
-  if (!query && !texto.includes('rhid') && !texto.includes('login')) {
-    return { 
-      deveResponder: true, 
-      resposta: '🔍 Por favor, especifique o que você gostaria que eu pesquise.\n\nExemplo: "pesquisar receitas de bolo" ou "rhid login"' 
-    };
-  }
-  
-  console.log(`🔍 Query extraída: "${query}"`);
-  
+
+  // ATIVA O FLUXO PARA ESTE USUÁRIO
+  usuariosEmFluxoREP.set(sender, {
+    etapa: 'aguardando_imagem',
+    tentativas: 0,
+    dados: {}
+  });
+
+  return { 
+    deveResponder: true, 
+    resposta: `🔧 **Identifiquei um problema no ponto!**\n\n` +
+              `📸 **Para ajudar, preciso que você envie uma FOTO do REP** mostrando:\n\n` +
+              `• **Número do REP**\n` +
+              `• **Senha/Contra Senha**\n\n` +
+              `_Com essas informações, posso acessar o sistema e ajudar no desbloqueio!_`
+  };
+}
+
+// ✅ FUNÇÃO PARA PROCESSAR IMAGEM DO REP
+async function processarImagemREP(mediaBuffer, sender) {
   try {
-    console.log(`🔍 Iniciando navegação para: "${query || 'RHID'}"`);
+    console.log('📸 Processando imagem do REP...');
     
-    // CORREÇÃO: Passa o telefone LIMPO para a função de pesquisa
-    if (searchInChrome) {
-      executarPesquisaEmSegundoPlano(query || 'rhid login', sender, false, telefoneLimpo);
-    }
+    const resultadoOCR = await processarImagemOCR(mediaBuffer);
     
-    // Para RHID, busca credenciais
-    let resposta = `🔍 **Abrindo Navegador:**\n\n`;
-    
-    if (texto.includes('rhid') || texto.includes('login')) {
-      const { getCredenciaisRHID } = require('../rhidLogins');
-      const credenciais = telefoneLimpo ? getCredenciaisRHID(telefoneLimpo) : null;
+    // Verifica se conseguiu extrair dados suficientes
+    if (resultadoOCR.sucesso && resultadoOCR.dadosREP.numeroREP && resultadoOCR.dadosREP.senha) {
+      // ✅ DADOS COMPLETOS - Pode abrir RHID
+      const telefoneLimpo = sender ? sender.replace('@s.whatsapp.net', '').replace(/\D/g, '') : null;
       
-      resposta += `📱 Baseado no telefone: ${telefoneFormatado}\n\n`;
+      // Limpa o fluxo do usuário
+      usuariosEmFluxoREP.delete(sender);
       
-      if (credenciais) {
-        resposta += `✅ **Credenciais encontradas!**\n`;
-        resposta += `👤 Usuário: ${credenciais.usuario}\n`;
-        resposta += `🔒 Senha: ${'*'.repeat(credenciais.senha.length)}\n\n`;
-        resposta += `🔄 **Login automático ativado!**\n`;
-        resposta += `O sistema vai preencher automaticamente os campos de login.`;
-      } else {
-        resposta += `⚠️ **Credenciais não encontradas**\n`;
-        resposta += `Entre em contato com o administrador para cadastrar seu telefone.\n`;
-        resposta += `📋 Telefone cadastrado: ${telefoneLimpo}`;
+      // Executa navegação em segundo plano
+      if (searchInChrome) {
+        executarNavegacaoRHID(sender, telefoneLimpo);
       }
+      
+      // ✅ RESPOSTA NO FORMATO EXATO DAS IMAGENS
+      return { 
+        resposta: `*Dados identificados:*\nREP: ${resultadoOCR.dadosREP.numeroREP}\nSenha: ${resultadoOCR.dadosREP.senha}\n\n*Processando desbloqueio...*`
+      };
+      
     } else {
-      resposta += `🌐 Pesquisando: "${query}"\n\n`;
-      resposta += `📝 Estou abrindo o navegador com sua pesquisa...`;
+      // ❌ DADOS INCOMPLETOS
+      const usuarioFluxo = usuariosEmFluxoREP.get(sender) || { tentativas: 0 };
+      usuarioFluxo.tentativas += 1;
+      usuariosEmFluxoREP.set(sender, usuarioFluxo);
+      
+      let resposta = '';
+      
+      if (resultadoOCR.dadosREP.numeroREP || resultadoOCR.dadosREP.senha) {
+        // Dados parciais
+        resposta = `*Dados parciais identificados:*\n`;
+        if (resultadoOCR.dadosREP.numeroREP) resposta += `✅ REP: ${resultadoOCR.dadosREP.numeroREP}\n`;
+        else resposta += `❌ REP: Não identificado\n`;
+        
+        if (resultadoOCR.dadosREP.senha) resposta += `✅ Senha: ${resultadoOCR.dadosREP.senha}\n`;
+        else resposta += `❌ Senha: Não identificada\n`;
+        
+        resposta += `\n📸 *Envie outra foto mais nítida* para completar os dados.`;
+      } else {
+        // Nenhum dado encontrado
+        resposta = `❌ *Não consegui identificar os dados do REP*\n\n` +
+                 `📸 *Envie outra foto mais nítida* mostrando:\n` +
+                 `• Número do REP\n` +
+                 `• Senha/Contra Senha`;
+      }
+      
+      if (usuarioFluxo.tentativas >= 3) {
+        usuariosEmFluxoREP.delete(sender);
+        resposta += `\n\n💡 *Sugestão:* Tire a foto com melhor iluminação e foco.`;
+      }
+      
+      return { resposta };
     }
-    
-    return { 
-      deveResponder: true, 
-      resposta: resposta
-    };
     
   } catch (error) {
-    console.error('❌ Erro ao processar pesquisa:', error);
+    console.error('❌ Erro ao processar imagem REP:', error);
     return { 
-      deveResponder: true, 
-      resposta: `⚠️ Erro ao abrir navegador: ${error.message}` 
+      resposta: '❌ Erro ao processar a imagem. Envie uma foto mais nítida do REP.'
     };
   }
 }
 
-// Função para extrair a query
-function extrairQueryDePesquisa(mensagem, palavrasPesquisa) {
-  let query = mensagem.trim();
+// ✅ FUNÇÃO PARA CONTINUAR FLUXO ATIVO
+async function continuarFluxoREP(mensagem, sender) {
+  const fluxoUsuario = usuariosEmFluxoREP.get(sender);
   
-  // Remove palavras de comando
-  palavrasPesquisa.forEach(palavra => {
-    const regex = new RegExp(`\\b${palavra}\\b`, 'gi');
-    query = query.replace(regex, '');
-  });
+  if (fluxoUsuario.etapa === 'aguardando_imagem') {
+    // Usuário enviou texto em vez de imagem
+    usuariosEmFluxoREP.delete(sender);
+    return {
+      resposta: `📸 **Preciso de uma FOTO do REP**\n\n` +
+               `Para ajudar com o desbloqueio, envie uma imagem mostrando:\n` +
+               `• Número do REP\n` +
+               `• Senha/Contra Senha\n\n` +
+               `_Não consigo ler essas informações apenas pelo texto._`
+    };
+  }
   
-  // Remove palavras comuns
-  const palavrasParaRemover = ['por', 'sobre', 'no', 'na', 'sobre o', 'sobre a', 'o site', 'a página'];
-  palavrasParaRemover.forEach(palavra => {
-    if (query.toLowerCase().startsWith(palavra + ' ')) {
-      query = query.substring(palavra.length).trim();
-    }
-  });
-  
-  // Limpa a query
-  query = query.replace(/["']/g, '').trim();
-  query = query.replace(/[.,!?;:]+$/, '').trim();
-  
-  return query;
+  // Limpa fluxo se não reconhece
+  usuariosEmFluxoREP.delete(sender);
+  return { deveResponder: false };
 }
 
-// Função para executar pesquisa
+// ✅ FUNÇÃO PARA EXECUTAR NAVEGAÇÃO RHID
+async function executarNavegacaoRHID(sender, telefoneLimpo) {
+  try {
+    if (searchInChrome) {
+      console.log(`🌐 Iniciando navegação RHID para: ${telefoneLimpo}`);
+      await searchInChrome('desbloqueio rep', false, telefoneLimpo);
+      console.log('✅ Navegação RHID concluída');
+    }
+  } catch (error) {
+    console.error('❌ Erro na navegação RHID:', error);
+  }
+}
+
+// ✅ FUNÇÃO LEGADA (mantida para compatibilidade)
 async function executarPesquisaEmSegundoPlano(query, sender, headless = false, telefone = null) {
   try {
-    const resultado = await searchInChrome(query, headless, telefone);
-    
-    if (resultado.success) {
-      console.log(`✅ Navegação concluída para telefone: ${telefone || 'N/A'}`);
-      if (resultado.credenciais) {
-        console.log(`🔑 Credenciais carregadas: ${resultado.credenciais.usuario}`);
+    if (searchInChrome) {
+      const resultado = await searchInChrome(query, headless, telefone);
+      if (resultado.success) {
+        console.log(`✅ Navegação concluída para: ${telefone || 'N/A'}`);
       }
-    } else {
-      console.error(`❌ Falha na navegação: ${resultado.error}`);
     }
-    
   } catch (error) {
-    console.error('❌ Erro na navegação em segundo plano:', error);
+    console.error('❌ Erro na navegação:', error);
   }
 }
 

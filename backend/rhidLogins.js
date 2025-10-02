@@ -2,12 +2,12 @@
 // Mapeamento de telefones para credenciais do RHID
 const loginsRHID = {
   '555196624904': { 
-    usuario: 'faturamento.rs@jkempe.com.br',
-    senha: '963852'
+    usuario: 'suportelugane@gmail.com',
+    senha: 'Lock203001'
   },
   '555192013748': { 
-    usuario: 'admin@gmail.com',
-    senha: 'admin12345'
+    usuario: 'suportelugane@gmail.com',
+    senha: 'Lock203001'
   }
 };
 

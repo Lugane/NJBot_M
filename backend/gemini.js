@@ -65,11 +65,17 @@ const API_URL = "https://router.huggingface.co/v1/chat/completions";
 
 async function gerarRespostaGemini(promptCompleto, mensagemUsuario) {
   try {
+    console.log('🤖 Consultando Apertus-8B...');
+    console.log('📝 Mensagem do usuário:', mensagemUsuario);
+
     const payload = {
       messages: [
-        { role: "user", content: promptCompleto }
+        { role: "system", content: promptCompleto.split('\n\n')[0] }, // Prompt do sistema
+        { role: "user", content: mensagemUsuario } // Mensagem do usuário
       ],
-      model: "swiss-ai/Apertus-8B-Instruct-2509:publicai"
+      model: "swiss-ai/Apertus-8B-Instruct-2509:publicai",
+      max_tokens: 500,
+      temperature: 0.7
     };
     
     const response = await axios.post(API_URL, payload, {
@@ -80,19 +86,31 @@ async function gerarRespostaGemini(promptCompleto, mensagemUsuario) {
       timeout: 30000
     });
     
-    const answer = response.data.choices[0].message.content;
+    if (!response.data?.choices?.[0]?.message?.content) {
+      console.error('❌ Resposta da API inválida:', response.data);
+      throw new Error('Resposta vazia da API');
+    }
+
+    const answer = response.data.choices[0].message.content.trim();
+    console.log('✅ Apertus respondeu:', answer.substring(0, 100) + '...');
+    
     return answer;
     
   } catch (err) {
-    console.error("❌ Erro na IA Apertus:", err);
+    console.error("❌ Erro na IA Apertus:", err.message);
     
-    if (err.response?.status === 429) {
-      return "⚠️ Limite de requisições excedido. Por favor, tente novamente em alguns instantes.";
+    // Log detalhado do erro
+    if (err.response) {
+      console.error('Status:', err.response.status);
+      console.error('Dados:', err.response.data);
     }
     
-    return "⚠️ Estou com dificuldades técnicas no momento. Por favor, tente novamente mais tarde.";
+    // Retorna erro para ser tratado no handleMensagem
+    throw err;
   }
 }
+
+module.exports = { gerarRespostaGemini };
 
 module.exports = { gerarRespostaGemini };
 
