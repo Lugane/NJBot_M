@@ -8,7 +8,6 @@ const path = require('path');
 const P = require('pino'); // Importa pino para o logger do Baileys
 
 // Importa as novas funcionalidades
-const { searchInChrome } = require('./chromeAutomation');
 const { connectToMongo, saveSearchLog } = require('./db');
 const { interpretCommand } = require('./aiProcessor');
 

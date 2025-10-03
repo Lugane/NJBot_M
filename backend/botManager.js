@@ -4,11 +4,11 @@ const qrcode = require('qrcode');
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const empresaDB = require('./models/Empresa');
 
-const bots = {};  
-const atendimentosManuais = {};  
-const qrCodesGerados = {}; 
+const bots = {};
+const atendimentosManuais = {};
+const qrCodesGerados = {};
 
-const statusBots = {}; 
+const statusBots = {};
 
 async function iniciarBot(empresa) {
   const pasta = path.join(__dirname, 'bots', empresa.nome, 'auth_info_baileys');
@@ -63,48 +63,79 @@ async function iniciarBot(empresa) {
   const handleMensagem = require('./handlers/chatbot');
   const { transcreverAudio } = require('./transcreverAudio');
 
-sock.ev.on('messages.upsert', async (m) => {
-  try {
-    const msg = m.messages?.[0];
-    if (!msg || !msg.message) return;
+  sock.ev.on('messages.upsert', async (m) => {
+    try {
+      const msg = m.messages?.[0];
+      if (!msg || !msg.message) return;
 
-    const sender = msg.key.remoteJid;
+      const sender = msg.key.remoteJid;
 
-    // Extrai telefone limpo
-    const telefone = sender ? sender.replace('@s.whatsapp.net', '') : null;
-    const telefoneLimpo = telefone ? telefone.replace(/\D/g, '') : null;
+      // Extrai telefone limpo
+      const telefone = sender ? sender.replace('@s.whatsapp.net', '') : null;
+      const telefoneLimpo = telefone ? telefone.replace(/\D/g, '') : null;
 
-    console.log(`\n📱 ===== DEBUG COMPLETO DO TELEFONE =====`);
-    console.log(`   - Sender original: ${sender}`);
-    console.log(`   - Telefone limpo: ${telefoneLimpo}`);
-    console.log(`==========================================\n`);
+      console.log(`\n📱 ===== DEBUG COMPLETO DO TELEFONE =====`);
+      console.log(`   - Sender original: ${sender}`);
+      console.log(`   - Telefone limpo: ${telefoneLimpo}`);
+      console.log(`==========================================\n`);
 
-    // ✅ DETECTA SE É MÍDIA (imagem, vídeo, documento)
-    let isMedia = false;
-    let mediaBuffer = null;
-    let mediaType = null;
+      // ✅ DETECTA SE É MÍDIA (imagem, vídeo, documento)
+      let isMedia = false;
+      let mediaBuffer = null;
+      let mediaType = null;
 
-    // Verifica tipos de mídia
-    if (msg.message?.imageMessage) {
-      isMedia = true;
-      mediaType = 'image';
-    } else if (msg.message?.videoMessage) {
-      isMedia = true;
-      mediaType = 'video';
-    } else if (msg.message?.documentMessage) {
-      isMedia = true;
-      mediaType = 'document';
-    }
+      // Verifica tipos de mídia
+      if (msg.message?.imageMessage) {
+        isMedia = true;
+        mediaType = 'image';
+      } else if (msg.message?.videoMessage) {
+        isMedia = true;
+        mediaType = 'video';
+      } else if (msg.message?.documentMessage) {
+        isMedia = true;
+        mediaType = 'document';
+      }
 
-    // ✅ FAZ DOWNLOAD DA MÍDIA SE NECESSÁRIO
-    if (isMedia) {
-      try {
-        console.log(`📥 Baixando mídia do tipo: ${mediaType}`);
-        
-        const stream = await downloadContentFromMessage(
-          msg.message[`${mediaType}Message`],
-          mediaType
-        );
+      // ✅ FAZ DOWNLOAD DA MÍDIA SE NECESSÁRIO
+      if (isMedia) {
+        try {
+          console.log(`📥 Baixando mídia do tipo: ${mediaType}`);
+
+          const stream = await downloadContentFromMessage(
+            msg.message[`${mediaType}Message`],
+            mediaType
+          );
+
+          const bufferStream = new WritableStreamBuffer();
+          for await (const chunk of stream) {
+            bufferStream.write(chunk);
+          }
+          bufferStream.end();
+
+          mediaBuffer = bufferStream.getContents();
+          console.log(`✅ Mídia baixada: ${mediaBuffer ? mediaBuffer.length : 0} bytes`);
+        } catch (downloadError) {
+          console.error('❌ Erro ao baixar mídia:', downloadError);
+          isMedia = false;
+          mediaBuffer = null;
+        }
+      }
+
+      // Extrai texto das mensagens
+      let texto =
+        msg.message?.conversation ||
+        msg.message?.extendedTextMessage?.text ||
+        msg.message?.imageMessage?.caption ||
+        msg.message?.videoMessage?.caption ||
+        msg.message?.documentMessage?.caption ||
+        msg.message?.buttonsResponseMessage?.selectedButtonId ||
+        msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+        '';
+
+      // Tratamento de áudio (voz)
+      if (msg.message?.voiceMessage || msg.message?.audioMessage) {
+        const type = msg.message.voiceMessage ? 'voiceMessage' : 'audioMessage';
+        const stream = await downloadContentFromMessage(msg.message[type], type.replace('Message', ''));
 
         const bufferStream = new WritableStreamBuffer();
         for await (const chunk of stream) {
@@ -112,142 +143,111 @@ sock.ev.on('messages.upsert', async (m) => {
         }
         bufferStream.end();
 
-        mediaBuffer = bufferStream.getContents();
-        console.log(`✅ Mídia baixada: ${mediaBuffer ? mediaBuffer.length : 0} bytes`);
-      } catch (downloadError) {
-        console.error('❌ Erro ao baixar mídia:', downloadError);
-        isMedia = false;
-        mediaBuffer = null;
+        const audioBuffer = bufferStream.getContents();
+        if (audioBuffer) {
+          texto = await transcreverAudio(audioBuffer);
+        }
       }
-    }
 
-    // Extrai texto das mensagens
-    let texto =
-      msg.message?.conversation ||
-      msg.message?.extendedTextMessage?.text ||
-      msg.message?.imageMessage?.caption ||
-      msg.message?.videoMessage?.caption ||
-      msg.message?.documentMessage?.caption ||
-      msg.message?.buttonsResponseMessage?.selectedButtonId ||
-      msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-      '';
+      const textoLower = texto.toLowerCase().trim();
 
-    // Tratamento de áudio (voz)
-    if (msg.message?.voiceMessage || msg.message?.audioMessage) {
-      const type = msg.message.voiceMessage ? 'voiceMessage' : 'audioMessage';
-      const stream = await downloadContentFromMessage(msg.message[type], type.replace('Message', ''));
+      // Lista de comandos permitidos mesmo se fromMe
+      const comandosPermitidosMesmoFromMe = [
+        '#bot', '#sair', '#encerrar', 'bot',
+        '#humano', '#atendente', '#manual'
+      ];
 
-      const bufferStream = new WritableStreamBuffer();
-      for await (const chunk of stream) {
-        bufferStream.write(chunk);
-      }
-      bufferStream.end();
-
-      const audioBuffer = bufferStream.getContents();
-      if (audioBuffer) {
-        texto = await transcreverAudio(audioBuffer);
-      }
-    }
-
-    const textoLower = texto.toLowerCase().trim();
-
-    // Lista de comandos permitidos mesmo se fromMe
-    const comandosPermitidosMesmoFromMe = [
-      '#bot', '#sair', '#encerrar', 'bot',
-      '#humano', '#atendente', '#manual'
-    ];
-
-    if (msg.key.fromMe && !comandosPermitidosMesmoFromMe.some(c => textoLower.includes(c))) {
-      return;
-    }
-
-    const empresaAtualizada = await empresaDB.findById(empresa._id);
-    if (!empresaAtualizada?.botAtivo) return;
-
-    const chaveAtendimento = `${empresaAtualizada._id}_${sender}`;
-    if (!atendimentosManuais[chaveAtendimento]) {
-      atendimentosManuais[chaveAtendimento] = {
-        ativo: false,
-        ultimoContato: null,
-        iniciado: false,
-        nomeEmpresa: empresaAtualizada.nome
-      };
-    }
-
-    const saudacoes = ['oi', 'olá', 'ola', 'bom dia', 'boa tarde', 'boa noite'];
-    const comandosEspeciais = ['#sair', '#bot', 'bot'];
-
-    // Comandos especiais
-    if (comandosEspeciais.includes(textoLower)) {
-      if (textoLower === '#sair') {
-        delete atendimentosManuais[chaveAtendimento];
-        await sock.sendMessage(sender, { text: '✅ Conversa reiniciada. Digite "oi" para começar.' });
+      if (msg.key.fromMe && !comandosPermitidosMesmoFromMe.some(c => textoLower.includes(c))) {
         return;
       }
-      if (textoLower === '#bot' || textoLower === 'bot') {
-        atendimentosManuais[chaveAtendimento] = { ativo: false, iniciado: false, nomeEmpresa: empresaAtualizada.nome };
-        await sock.sendMessage(sender, { text: '🤖 Atendimento automático ativado.' });
+
+      const empresaAtualizada = await empresaDB.findById(empresa._id);
+      if (!empresaAtualizada?.botAtivo) return;
+
+      const chaveAtendimento = `${empresaAtualizada._id}_${sender}`;
+      if (!atendimentosManuais[chaveAtendimento]) {
+        atendimentosManuais[chaveAtendimento] = {
+          ativo: false,
+          ultimoContato: null,
+          iniciado: false,
+          nomeEmpresa: empresaAtualizada.nome
+        };
+      }
+
+      const saudacoes = ['oi', 'olá', 'ola', 'bom dia', 'boa tarde', 'boa noite'];
+      const comandosEspeciais = ['#sair', '#bot', 'bot'];
+
+      // Comandos especiais
+      if (comandosEspeciais.includes(textoLower)) {
+        if (textoLower === '#sair') {
+          delete atendimentosManuais[chaveAtendimento];
+          await sock.sendMessage(sender, { text: '✅ Conversa reiniciada. Digite "oi" para começar.' });
+          return;
+        }
+        if (textoLower === '#bot' || textoLower === 'bot') {
+          atendimentosManuais[chaveAtendimento] = { ativo: false, iniciado: false, nomeEmpresa: empresaAtualizada.nome };
+          await sock.sendMessage(sender, { text: '🤖 Atendimento automático ativado.' });
+          return;
+        }
+      }
+
+      // Palavras-chave para atendimento humano
+      const palavrasChaveAtendente = [
+        'atendente', 'humano', 'pessoa', 'falar com atendente', 'falar com humano',
+        'quero atendimento humano', 'quero falar com alguém', 'ajuda de um atendente',
+        'quero um atendente', 'preciso de ajuda humana',
+        '#humano', '#atendente', '#manual'
+      ];
+
+      if (palavrasChaveAtendente.some(p => textoLower.includes(p))) {
+        atendimentosManuais[chaveAtendimento].ativo = true;
+        atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
+
+        if (!msg.key.fromMe) {
+          await sock.sendMessage(sender, { text: '📨 Solicitação enviada ao atendente humano. Aguarde um momento.' });
+        }
         return;
       }
-    }
 
-    // Palavras-chave para atendimento humano
-    const palavrasChaveAtendente = [
-      'atendente', 'humano', 'pessoa', 'falar com atendente', 'falar com humano',
-      'quero atendimento humano', 'quero falar com alguém', 'ajuda de um atendente',
-      'quero um atendente', 'preciso de ajuda humana',
-      '#humano', '#atendente', '#manual'
-    ];
-
-    if (palavrasChaveAtendente.some(p => textoLower.includes(p))) {
-      atendimentosManuais[chaveAtendimento].ativo = true;
-      atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
-
-      if (!msg.key.fromMe) {
-        await sock.sendMessage(sender, { text: '📨 Solicitação enviada ao atendente humano. Aguarde um momento.' });
+      // Se atendimento humano ativo, apenas atualiza último contato
+      if (atendimentosManuais[chaveAtendimento]?.ativo) {
+        atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
+        console.log(`👤 Atendimento humano ativo para: ${sender}`);
+        return;
       }
-      return;
-    }
 
-    // Se atendimento humano ativo, apenas atualiza último contato
-    if (atendimentosManuais[chaveAtendimento]?.ativo) {
+      // Saudação inicial
+      if (saudacoes.includes(textoLower) && !atendimentosManuais[chaveAtendimento].iniciado) {
+        atendimentosManuais[chaveAtendimento].iniciado = true;
+        atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
+
+        await sock.sendMessage(sender, {
+          text: `Olá! 👋 Bem-vindo(a) à ${empresaAtualizada.nome}! Como posso te ajudar?`
+        });
+        return;
+      }
+
+      // Atualiza último contato
       atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
-      console.log(`👤 Atendimento humano ativo para: ${sender}`);
-      return;
+
+      // Atualiza presença
+      await sock.sendPresenceUpdate('composing', sender);
+
+      // ✅ CHAMA handleMensagem COM OS PARÂMETROS CORRETOS
+      const resposta = await handleMensagem(
+        empresaAtualizada._id,
+        texto,
+        sender,
+        isMedia,      // ✅ Agora está definido
+        mediaBuffer   // ✅ Agora está definido
+      );
+
+      await sock.sendMessage(sender, { text: resposta.resposta });
+
+    } catch (err) {
+      console.error('❌ Erro no processamento da mensagem:', err);
     }
-
-    // Saudação inicial
-    if (saudacoes.includes(textoLower) && !atendimentosManuais[chaveAtendimento].iniciado) {
-      atendimentosManuais[chaveAtendimento].iniciado = true;
-      atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
-
-      await sock.sendMessage(sender, {
-        text: `Olá! 👋 Bem-vindo(a) à ${empresaAtualizada.nome}! Como posso te ajudar?`
-      });
-      return;
-    }
-
-    // Atualiza último contato
-    atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
-
-    // Atualiza presença
-    await sock.sendPresenceUpdate('composing', sender);
-
-    // ✅ CHAMA handleMensagem COM OS PARÂMETROS CORRETOS
-    const resposta = await handleMensagem(
-      empresaAtualizada._id, 
-      texto, 
-      sender,
-      isMedia,      // ✅ Agora está definido
-      mediaBuffer   // ✅ Agora está definido
-    );
-    
-    await sock.sendMessage(sender, { text: resposta.resposta });
-
-  } catch (err) {
-    console.error('❌ Erro no processamento da mensagem:', err);
-  }
-});
+  });
 
   bots[empresa.nome] = sock;
   const qrCodeBase64 = await qrCodePromise.then(qr => qrcode.toDataURL(qr));
@@ -362,3 +362,33 @@ module.exports = {
   statusBots
 };
 
+
+function enviarMensagemParaContato(nomeEmpresa, destinatario, mensagem, imagemBuffer = null) {
+  const sock = bots[nomeEmpresa];
+
+  if (!sock) {
+    console.error(`❌ Bot não encontrado para empresa: ${nomeEmpresa}`);
+    return false;
+  }
+
+  try {
+    // Envia apenas texto, ignorando imagemBuffer
+    return sock.sendMessage(destinatario, {
+       text: mensagem
+    });
+  } catch (error) {
+    console.error('❌ Erro ao enviar mensagem:', error);
+    return false;
+  }
+}
+
+// Adicione à exportação:
+module.exports = {
+  iniciarBot,
+  getQRCode,
+  reiniciarBot,
+  toggleBot,
+  deletarEmpresa,
+  statusBots,
+  enviarMensagemParaContato  // ✅ NOVA FUNÇÃO
+};

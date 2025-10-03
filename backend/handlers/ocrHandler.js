@@ -2,6 +2,7 @@
 const Tesseract = require('tesseract.js');
 const sharp = require('sharp');
 const axios = require('axios');
+const fs = require('fs');
 
 // Verifica se Google Vision está disponível
 let googleVisionDisponivel = false;
@@ -9,24 +10,84 @@ let visionClient = null;
 
 try {
   const vision = require('@google-cloud/vision');
+  
+  // ✅ VERIFICAÇÃO CORRIGIDA - Checa se existe arquivo de credenciais
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    visionClient = new vision.ImageAnnotatorClient();
-    googleVisionDisponivel = true;
-    console.log('✅ Google Vision configurado e disponível');
+    const credenciaisPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    
+    if (fs.existsSync(credenciaisPath)) {
+      visionClient = new vision.ImageAnnotatorClient();
+      googleVisionDisponivel = true;
+      console.log('✅ Google Vision configurado e disponível');
+    } else {
+      console.log('❌ Google Vision: Arquivo de credenciais não encontrado em:', credenciaisPath);
+    }
   } else {
-    console.log('⚠️ Google Vision: Credenciais não configuradas');
+    console.log('ℹ️ Google Vision: Variável GOOGLE_APPLICATION_CREDENTIALS não configurada');
   }
 } catch (error) {
   console.log('⚠️ Google Vision não disponível:', error.message);
 }
 
+async function removerSobreposicaoVermelha(bufferImagem) {
+  try {
+    console.log('🎨 [Pré-processamento] Removendo sobreposição vermelha...');
+
+    // Carrega a imagem e obtém os dados dos pixels
+    const { data, info } = await sharp(bufferImagem)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const { width, height, channels } = info;
+    const outputBuffer = Buffer.alloc(width * height * channels);
+
+    // Itera sobre os pixels para identificar e remover o vermelho
+    for (let i = 0; i < data.length; i += channels) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      // Condição para identificar o vermelho (pode precisar de ajuste fino)
+      // Ex: vermelho intenso com pouco verde e azul
+      if (r > 150 && g < 100 && b < 100) {
+        // Substitui o pixel vermelho por preto (ou branco, dependendo do fundo)
+        outputBuffer[i] = 0;     // R
+        outputBuffer[i + 1] = 0; // G
+        outputBuffer[i + 2] = 0; // B
+      } else {
+        // Mantém o pixel original
+        outputBuffer[i] = r;
+        outputBuffer[i + 1] = g;
+        outputBuffer[i + 2] = b;
+      }
+      if (channels === 4) { // Se houver canal alfa
+        outputBuffer[i + 3] = data[i + 3];
+      }
+    }
+
+    // Converte o buffer de volta para uma imagem JPEG, com qualidade para reduzir tamanho
+    const imagemLimpa = await sharp(outputBuffer, { raw: info })
+      .jpeg({ quality: 80 }) // Ajustar qualidade para reduzir tamanho
+      .toBuffer();
+
+    console.log('✅ [Pré-processamento] Sobreposição vermelha removida.');
+    return imagemLimpa;
+
+  } catch (error) {
+    console.error('❌ [Pré-processamento] Erro ao remover sobreposição vermelha:', error.message);
+    return bufferImagem; // Retorna a imagem original em caso de erro
+  }
+}
+
 // ESTRATÉGIA 1: TESSERACT (Local)
+
 async function processarComTesseract(bufferImagem) {
   try {
     console.log('🔍 [Tesseract] Iniciando processamento...');
-    
-    const imagemOtimizada = await sharp(bufferImagem)
-      .resize(2500)
+
+    const imagemSemSobreposicao = await removerSobreposicaoVermelha(bufferImagem);
+    const imagemOtimizada = await sharp(imagemSemSobreposicao)
+      .resize(2000) // Reduzir o redimensionamento para evitar arquivos muito grandes
       .greyscale()
       .normalise()
       .linear(2.0, 0)
@@ -48,9 +109,9 @@ async function processarComTesseract(bufferImagem) {
     );
 
     console.log(`✅ [Tesseract] Concluído! Confiança: ${confidence}`);
-    
+
     const dadosREP = extrairDadosREPCorrigido(text);
-    
+
     return {
       sucesso: true,
       provedor: 'tesseract',
@@ -58,7 +119,7 @@ async function processarComTesseract(bufferImagem) {
       confianca: confidence,
       dadosREP: dadosREP
     };
-    
+
   } catch (error) {
     console.error('❌ [Tesseract] Erro:', error.message);
     return {
@@ -75,10 +136,11 @@ async function processarComTesseract(bufferImagem) {
 async function processarComOCRSpace(bufferImagem) {
   try {
     console.log('🌐 [OCR.Space] Iniciando API...');
-    
+
     // Para Node.js, precisamos usar uma abordagem diferente do FormData
-    const base64Image = bufferImagem.toString('base64');
-    
+    const imagemSemSobreposicao = await removerSobreposicaoVermelha(bufferImagem);
+    const base64Image = imagemSemSobreposicao.toString('base64');
+
     const params = new URLSearchParams();
     params.append('apikey', 'helloworld'); // Chave gratuita
     params.append('base64Image', `data:image/jpeg;base64,${base64Image}`);
@@ -98,7 +160,7 @@ async function processarComOCRSpace(bufferImagem) {
     );
 
     const data = response.data;
-    
+
     if (data.IsErroredOnProcessing) {
       throw new Error(data.ErrorMessage || 'Erro no OCR.Space');
     }
@@ -111,9 +173,9 @@ async function processarComOCRSpace(bufferImagem) {
     const confianca = data.ParsedResults[0].FileParseExitCode === 1 ? 0.85 : 0.5;
 
     console.log(`✅ [OCR.Space] Concluído!`);
-    
+
     const dadosREP = extrairDadosREPCorrigido(texto);
-    
+
     return {
       sucesso: true,
       provedor: 'ocrspace',
@@ -142,22 +204,23 @@ async function processarComGoogleVision(bufferImagem) {
 
   try {
     console.log('☁️ [Google Vision] Iniciando...');
-    
+
+    const imagemSemSobreposicao = await removerSobreposicaoVermelha(bufferImagem);
     const [result] = await visionClient.textDetection({
-      image: { content: bufferImagem.toString('base64') }
+      image: { content: imagemSemSobreposicao.toString("base64") }
     });
 
     const detections = result.textAnnotations;
-    
+
     if (!detections || detections.length === 0) {
       throw new Error('Nenhum texto detectado pelo Google Vision');
     }
 
     const texto = detections[0].description;
     console.log(`✅ [Google Vision] Concluído!`);
-    
+
     const dadosREP = extrairDadosREPCorrigido(texto);
-    
+
     return {
       sucesso: true,
       provedor: 'google-vision',
@@ -175,16 +238,17 @@ async function processarComGoogleVision(bufferImagem) {
 // 🎯 ESTRATÉGIA PRINCIPAL: MULTI-OCR COM FALLBACK SEGURO
 async function processarImagemMultiploOCR(bufferImagem) {
   console.log('🚀 INICIANDO PROCESSAMENTO MULTI-ESTRATÉGIA OCR');
-  
+
   // Estratégias base (sempre disponíveis)
   const estrategias = [
     { nome: 'Tesseract', funcao: processarComTesseract },
     { nome: 'OCR.Space', funcao: processarComOCRSpace }
   ];
 
-  // Adiciona Google Vision apenas se estiver disponível
-  if (googleVisionDisponivel) {
+  // ✅ CORREÇÃO: Só adiciona Google Vision se estiver realmente disponível
+  if (googleVisionDisponivel && visionClient) {
     estrategias.push({ nome: 'Google Vision', funcao: processarComGoogleVision });
+    console.log('✅ Google Vision adicionado às estratégias');
   } else {
     console.log('ℹ️ Google Vision não adicionado (não disponível)');
   }
@@ -195,7 +259,7 @@ async function processarImagemMultiploOCR(bufferImagem) {
   // Executa estratégias em sequência
   for (const estrategia of estrategias) {
     console.log(`\n🔄 Tentando estratégia: ${estrategia.nome}`);
-    
+
     try {
       const resultado = await estrategia.funcao(bufferImagem);
       tentativas.push({
@@ -253,8 +317,8 @@ async function processarImagemMultiploOCR(bufferImagem) {
 
 // FUNÇÃO DE EXTRAÇÃO INTELIGENTE (MELHORADA)
 function extrairDadosREPCorrigido(texto) {
-  console.log('🔄 Analisando texto extraído...');
-  
+  console.log('🔍 Analisando texto do REP...');
+
   const dados = {
     numeroREP: null,
     senha: null
@@ -267,45 +331,114 @@ function extrairDadosREPCorrigido(texto) {
 
     console.log(`📄 Linhas detectadas: ${linhas.length}`);
 
-    // 🔍 ESTRATÉGIA: Busca todos os números e aplica lógica inteligente
-    const todosNumeros = texto.match(/([0-9]{10,20})/g) || [];
-    console.log(`🔢 Todos os números encontrados: ${todosNumeros.join(', ')}`);
+    // ESTRATÉGIA 1: Busca por contexto específico (prioritária)
+    console.log('🔄 Buscando por contexto específico...');
 
-    if (todosNumeros.length > 0) {
-      // REGRA 1: REP é o número MAIS LONGO
-      todosNumeros.sort((a, b) => b.length - a.length);
-      dados.numeroREP = todosNumeros[0];
-      console.log(`✅ REP identificado (mais longo): ${dados.numeroREP}`);
+    for (let i = 0; i < linhas.length; i++) {
+      const linha = linhas[i].toLowerCase();
 
-      // REGRA 2: Senha é número que começa com mesmo prefixo mas é mais curto
-      if (todosNumeros.length > 1) {
-        const prefixoREP = dados.numeroREP.substring(0, 6);
-        
-        for (const numero of todosNumeros.slice(1)) {
-          if (numero.startsWith(prefixoREP) && numero.length < dados.numeroREP.length) {
-            dados.senha = numero;
-            console.log(`✅ Senha identificada (prefixo compatível): ${dados.senha}`);
-            break;
+      // Normaliza erros comuns de OCR para a linha atual
+      const linhaNormalizada = linha
+        .replace(/o/g, '0')
+        .replace(/[il]/g, '1')
+        .replace(/s/g, '5');
+
+      // Extração do REP
+      if (linhaNormalizada.includes('numero do rep:') || linhaNormalizada.includes('numero do rep') || linhaNormalizada.includes('rep:')) {
+        let repMatch = linhaNormalizada.match(/([0-9]{15,18})/);
+        if (repMatch) {
+          dados.numeroREP = repMatch[1];
+          console.log(`✅ REP identificado por contexto: ${dados.numeroREP}`);
+        } else {
+          // Tenta buscar nas próximas linhas se não encontrou na mesma
+          for (let j = i + 1; j < Math.min(i + 3, linhas.length); j++) {
+            repMatch = linhas[j].toLowerCase().match(/([0-9]{15,18})/);
+            if (repMatch) {
+              dados.numeroREP = repMatch[1];
+              console.log(`✅ REP identificado por contexto (linha seguinte): ${dados.numeroREP}`);
+              break;
+            }
           }
         }
-        
-        // Fallback: segundo número mais longo
-        if (!dados.senha) {
-          dados.senha = todosNumeros[1];
-          console.log(`✅ Senha identificada (segundo mais longo): ${dados.senha}`);
+      }
+
+      // Extração da Senha
+      if (linhaNormalizada.includes('senha:') || linhaNormalizada.includes('senha')) {
+        let senhaMatch = linhaNormalizada.match(/([0-9]{10})/);
+
+        if (!senhaMatch) {
+          // Tenta buscar nas próximas linhas se não encontrou na mesma
+          for (let j = i + 1; j < Math.min(i + 3, linhas.length); j++) {
+            senhaMatch = linhas[j].toLowerCase().match(/([0-9]{10})/);
+            if (senhaMatch) {
+              break;
+            }
+          }
+        }
+
+        if (senhaMatch) {
+          let senhaExtraida = senhaMatch[1];
+
+          // 🔧 Correções automáticas para a senha
+          // Se começar com "4" e a imagem sugere "1"
+          if (senhaExtraida.startsWith("4")) {
+            console.log(`⚠️ Corrigindo primeiro dígito da senha de 4 para 1: ${senhaExtraida}`);
+            senhaExtraida = "1" + senhaExtraida.substring(1);
+          }
+          // Outras correções comuns (ex: 9 por 1)
+          senhaExtraida = senhaExtraida.replace(/9/g, '1'); // Exemplo: se 9 for frequentemente lido como 1
+
+          dados.senha = senhaExtraida;
+          console.log(`✅ Senha final: ${dados.senha}`);
         }
       }
     }
 
-    // Validação final
-    if (dados.numeroREP && dados.senha && dados.numeroREP === dados.senha) {
-      console.log('⚠️ CORREÇÃO: REP e Senha iguais');
-      dados.senha = null;
+    // ESTRATÉGIA 2: Fallback - Busca por números longos se contexto falhou
+    if (!dados.numeroREP || !dados.senha) {
+      console.log('🔄 Contexto falhou, buscando por números longos...');
+      const todosNumeros = texto.match(/([0-9]{10,18})/g) || [];
+      console.log(`🔢 Números encontrados: ${todosNumeros.join(', ')}`);
+
+      const numerosUnicos = [...new Set(todosNumeros)];
+
+      const candidatosREP = numerosUnicos.filter(n => n.length >= 15 && n.length <= 18);
+      const candidatosSenha = numerosUnicos.filter(n => n.length === 10);
+
+      console.log(`🎯 Candidatos REP (fallback): ${candidatosREP.join(', ')}`);
+      console.log(`🎯 Candidatos Senha (fallback): ${candidatosSenha.join(', ')}`);
+
+      if (!dados.numeroREP && candidatosREP.length > 0) {
+        candidatosREP.sort((a, b) => b.length - a.length);
+        dados.numeroREP = candidatosREP[0];
+        console.log(`✅ REP identificado (fallback): ${dados.numeroREP}`);
+      }
+
+      if (!dados.senha && candidatosSenha.length > 0) {
+        if (dados.numeroREP) {
+          const senhasValidas = candidatosSenha.filter(senha => senha !== dados.numeroREP);
+          if (senhasValidas.length > 0) {
+            dados.senha = senhasValidas[0];
+          } else {
+            dados.senha = candidatosSenha[0];
+          }
+        } else {
+          dados.senha = candidatosSenha[0];
+        }
+        console.log(`✅ Senha identificada (fallback): ${dados.senha}`);
+      }
     }
 
+    // VALIDAÇÃO FINAL
     console.log('📋 RESULTADO FINAL:');
-    console.log(`   REP: ${dados.numeroREP || 'NÃO ENCONTRADO'} (${dados.numeroREP?.length || 0} dígitos)`);
-    console.log(`   Senha: ${dados.senha || 'NÃO ENCONTRADA'} (${dados.senha?.length || 0} dígitos)`);
+    console.log(`   REP: ${dados.numeroREP || 'NÃO ENCONTRADO'}`);
+    console.log(`   Senha: ${dados.senha || 'NÃO ENCONTRADA'}`);
+
+    // Corrige formato se necessário
+    if (dados.numeroREP && dados.numeroREP.length > 18) {
+      dados.numeroREP = dados.numeroREP.substring(0, 18);
+      console.log(`🔧 REP truncado para: ${dados.numeroREP}`);
+    }
 
   } catch (error) {
     console.error('❌ Erro ao extrair dados:', error);
@@ -318,10 +451,10 @@ function extrairDadosREPCorrigido(texto) {
 function ehResultadoMelhor(novo, atual) {
   const novoCompleto = novo.dadosREP.numeroREP && novo.dadosREP.senha;
   const atualCompleto = atual.dadosREP.numeroREP && atual.dadosREP.senha;
-  
+
   if (novoCompleto && !atualCompleto) return true;
   if (!novoCompleto && atualCompleto) return false;
-  
+
   return novo.confianca > atual.confianca;
 }
 
@@ -341,7 +474,7 @@ function gerarRespostaOCR(dadosOCR) {
   let mensagem = `*Dados identificados (via ${provedor})*:\n`;
 
   if (dadosREP.numeroREP && dadosREP.senha) {
-    mensagem += `✅ REP: ${dadosREP.numeroREP}\n✅ Senha: ${dadosREP.senha}`;
+    mensagem += `✅ REP: ${dados.numeroREP}\n✅ Senha: ${dados.senha}`;
   } else if (dadosREP.numeroREP && !dadosREP.senha) {
     mensagem += `✅ REP: ${dadosREP.numeroREP}\n❌ Senha: Não identificada`;
   } else if (!dadosREP.numeroREP && dadosREP.senha) {
