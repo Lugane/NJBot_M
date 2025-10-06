@@ -238,8 +238,8 @@ async function iniciarBot(empresa) {
         empresaAtualizada._id,
         texto,
         sender,
-        isMedia,      // ✅ Agora está definido
-        mediaBuffer   // ✅ Agora está definido
+        isMedia,
+        mediaBuffer   
       );
 
       await sock.sendMessage(sender, { text: resposta.resposta });
