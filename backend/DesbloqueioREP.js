@@ -85,6 +85,7 @@ async function fazerLoginRHID(page, credenciais) {
 
   } catch (error) {
     console.log('⚠️ Erro no login:', error.message);
+    throw error; // Propaga o erro para tratamento superior
   }
 }
 
@@ -107,7 +108,7 @@ async function clicarMenuUtilitarios(page) {
             await elements[0].click();
             console.log('✅ Menu Utilitários clicado!');
             await new Promise(resolve => setTimeout(resolve, 2000));
-            return;
+            return true;
           }
         } else {
           const element = await page.evaluateHandle((sel) => {
@@ -118,14 +119,16 @@ async function clicarMenuUtilitarios(page) {
             await element.click();
             console.log('✅ Menu Utilitários clicado!');
             await new Promise(resolve => setTimeout(resolve, 2000));
-            return;
+            return true;
           }
         }
       } catch (error) { }
     }
     console.log('⚠️ Menu Utilitários não encontrado');
+    return false;
   } catch (error) {
     console.log('⚠️ Erro ao clicar menu Utilitários:', error.message);
+    return false;
   }
 }
 
@@ -147,7 +150,7 @@ async function clicarSubmenuDesbloqREP(page) {
             await elements[0].click();
             console.log('✅ Submenu Desbloq. REP clicado!');
             await new Promise(resolve => setTimeout(resolve, 2000));
-            return;
+            return true;
           }
         } else {
           const element = await page.evaluateHandle((sel) => {
@@ -158,14 +161,16 @@ async function clicarSubmenuDesbloqREP(page) {
             await element.click();
             console.log('✅ Submenu Desbloq. REP clicado!');
             await new Promise(resolve => setTimeout(resolve, 2000));
-            return;
+            return true;
           }
         }
       } catch (error) { }
     }
     console.log('⚠️ Submenu Desbloq. REP não encontrado');
+    return false;
   } catch (error) {
     console.log('⚠️ Erro ao clicar submenu:', error.message);
+    return false;
   }
 }
 
@@ -174,15 +179,24 @@ async function navegarParaDesbloqueioREP(page, dadosREP) {
   try {
     console.log('🧭 Navegando para Desbloqueio REP...');
 
-    await clicarMenuUtilitarios(page);
-    await clicarSubmenuDesbloqREP(page);
+    const menuClicado = await clicarMenuUtilitarios(page);
+    if (!menuClicado) {
+      throw new Error('Não foi possível clicar no menu Utilitários');
+    }
+
+    const submenuClicado = await clicarSubmenuDesbloqREP(page);
+    if (!submenuClicado) {
+      throw new Error('Não foi possível clicar no submenu Desbloq. REP');
+    }
 
     if (dadosREP && dadosREP.numeroREP && dadosREP.senha) {
       await preencherFormularioDesbloqueio(page, dadosREP);
     }
 
+    return true;
   } catch (error) {
     console.log('⚠️ Erro na navegação:', error.message);
+    throw error;
   }
 }
 
@@ -258,7 +272,7 @@ async function preencherFormularioDesbloqueio(page, dadosREP) {
           await botaoConfirmar.click();
           console.log('✅ Formulário submetido! Aguardando resultado...');
 
-          // ✅ CAPTURA O RESULTADO DO DESBLOQUEIO (COM PRINT)
+          // ✅ CAPTURA O RESULTADO DO DESBLOQUEIO
           await capturarResultadoDesbloqueio(page, dadosREP.telefone || 'desconhecido');
           break;
         }
@@ -266,18 +280,17 @@ async function preencherFormularioDesbloqueio(page, dadosREP) {
     }
 
     if (!serialField || !senhaField) {
-      console.log('⚠️ Campos do formulário não encontrados automaticamente');
-      console.log('💡 Preencha manualmente os campos:');
-      console.log(`   Serial: ${dadosREP.numeroREP}`);
-      console.log(`   Senha: ${dadosREP.senha}`);
+      throw new Error('Campos do formulário não encontrados');
     }
 
+    return true;
   } catch (error) {
     console.log('⚠️ Erro ao preencher formulário:', error.message);
+    throw error;
   }
 }
 
-// FUNÇÃO PARA CAPTURAR E ENVIAR PRINT DO RESULTADO - OTIMIZADA
+// FUNÇÃO PARA CAPTURAR E ENVIAR RESULTADO
 async function capturarResultadoDesbloqueio(page, telefone) {
   try {
     console.log('📊 Aguardando resultado do desbloqueio...');
@@ -323,7 +336,7 @@ async function capturarResultadoDesbloqueio(page, telefone) {
       return null;
     }
 
-    // 📤 MONTAGEM DA MENSAGEM NO FORMATO SOLICITADO
+    // 📤 MONTAGEM DA MENSAGEM
     if (callbackWhatsApp) {
       let mensagemFinal = '';
       let tipoGeral = 'info';
@@ -344,20 +357,17 @@ async function capturarResultadoDesbloqueio(page, telefone) {
         }
       });
 
-      // MONTA A MENSAGEM NO FORMATO EXATO DA IMAGEM
+      // MONTA A MENSAGEM
       if (codigoDesbloqueio) {
-        // Extrai apenas o número do código (última parte)
         const codigoMatch = codigoDesbloqueio.match(/é (\d+)/);
         const codigoNumero = codigoMatch ? codigoMatch[1] : '';
         
         mensagemFinal = `O código de desbloqueio do equipamento modelo iDClass Bio Prox é \n${codigoNumero}`;
         
-        // Adiciona avisos se existirem
         if (avisoDesbloqueio || avisoBateria) {
           mensagemFinal += `\n\n⚠️ ${avisoDesbloqueio} ${avisoBateria}`;
         }
       } else {
-        // Fallback para outros tipos de resultado
         resultados.forEach((res, index) => {
           if (res.tipo === 'sucesso') {
             mensagemFinal += `✅ ${res.texto}\n\n`;
@@ -382,13 +392,11 @@ async function capturarResultadoDesbloqueio(page, telefone) {
       await enviarResultadoWhatsApp('Erro ao processar desbloqueio. Verifique manualmente.', 'erro', telefone);
     }
 
-    return null;
+    throw error;
   }
 }
 
-
-
-// FUNÇÃO PARA ENVIAR RESULTADO VIA WHATSAPP - OTIMIZADA
+// FUNÇÃO PARA ENVIAR RESULTADO VIA WHATSAPP
 async function enviarResultadoWhatsApp(resultado, tipo, telefone) {
   try {
     if (!callbackWhatsApp) {
@@ -398,7 +406,6 @@ async function enviarResultadoWhatsApp(resultado, tipo, telefone) {
 
     let mensagem = '';
 
-    // FORMATAÇÃO EXATA COMO NA IMAGEM
     if (tipo === 'sucesso') {
       mensagem = `✅ DESBLOQUEIO REALIZADO COM SUCESSO! ✅\n\n` +
                  `📋 Resultado: ${resultado}`;
@@ -428,23 +435,9 @@ async function enviarResultadoWhatsApp(resultado, tipo, telefone) {
   }
 }
 
-// FUNÇÃO PARA ABRIR CHROME SIMPLES
-async function justOpenInChromeBrowser(rhidUrl, query, telefone, headless = true, dadosREP = null) {
+// FUNÇÃO PARA ABRIR CHROME SIMPLES (MODO NÃO-HEADLESS SEM PUPPETEER)
+async function justOpenInChromeBrowser(rhidUrl, query, telefone, dadosREP = null) {
   try {
-    if (headless) {
-      console.log('💻 Modo headless - navegador não aberto visualmente');
-      return {
-        success: true,
-        title: `RHID Login`,
-        url: rhidUrl,
-        query: query,
-        credenciais: telefone ? getCredenciaisRHID(telefone) : null,
-        telefone: telefone,
-        headless: headless,
-        dadosREP: dadosREP
-      };
-    }
-
     let command;
     if (process.platform === 'win32') {
       command = `start chrome "${rhidUrl}"`;
@@ -472,7 +465,7 @@ async function justOpenInChromeBrowser(rhidUrl, query, telefone, headless = true
       query: query,
       credenciais: telefone ? getCredenciaisRHID(telefone) : null,
       telefone: telefone,
-      headless: headless,
+      headless: false,
       dadosREP: dadosREP
     };
 
@@ -483,7 +476,7 @@ async function justOpenInChromeBrowser(rhidUrl, query, telefone, headless = true
       error: 'Não foi possível abrir o navegador',
       query: query,
       telefone: telefone,
-      headless: headless,
+      headless: false,
       dadosREP: dadosREP
     };
   }
@@ -494,8 +487,15 @@ async function openInChrome(query, headless = true, telefone = null, dadosREP = 
   let browser = null;
 
   try {
+    // ✅ NORMALIZA O VALOR DE HEADLESS (aceita string, boolean, etc)
+    if (typeof headless === 'string') {
+      headless = headless.toLowerCase() === 'true' || headless === '1';
+    } else {
+      headless = Boolean(headless);
+    }
+    
     console.log(`🚀 Abrindo RHID para telefone: ${telefone}`);
-    console.log(`💻 Modo headless: ${headless ? 'SIM' : 'NÃO'}`);
+    console.log(`💻 Modo headless DEFINITIVO: ${headless ? 'SIM (sem UI)' : 'NÃO (com UI)'}`);
 
     // ✅ Armazena a função de callback para enviar mensagem via WhatsApp
     callbackWhatsApp = callback;
@@ -513,73 +513,70 @@ async function openInChrome(query, headless = true, telefone = null, dadosREP = 
     if (telefone) {
       credenciais = getCredenciaisRHID(telefone);
       if (credenciais) {
-        console.log(`🔑 Credenciais: ${credenciais.usuario} / ${credenciais.senha}`);
+        console.log(`🔑 Credenciais encontradas para: ${credenciais.usuario}`);
       } else {
         console.log('⚠️ Nenhuma credencial encontrada para este telefone');
-        return await justOpenInChromeBrowser(rhidUrl, query, telefone, headless, dadosREP);
+        
+        // Se não tem credenciais, só abre o browser normalmente
+        if (!headless) {
+          return await justOpenInChromeBrowser(rhidUrl, query, telefone, dadosREP);
+        } else {
+          throw new Error('Credenciais não encontradas - impossível executar em modo headless');
+        }
       }
     } else {
-      return await justOpenInChromeBrowser(rhidUrl, query, telefone, headless, dadosREP);
+      // Sem telefone, sem credenciais
+      if (!headless) {
+        return await justOpenInChromeBrowser(rhidUrl, query, telefone, dadosREP);
+      } else {
+        throw new Error('Telefone não fornecido - impossível executar em modo headless');
+      }
     }
 
-    // SE headless = false, usa Puppeteer para abrir e preencher
-    if (!headless) {
-      console.log('🌐 Iniciando automação com Puppeteer...');
-      browser = await puppeteer.launch({
-        headless: false,
-        defaultViewport: null,
-        args: ['--start-maximized']
-      });
+    // ✅ MODO HEADLESS OU NÃO-HEADLESS COM PUPPETEER
+    console.log(`🌐 Iniciando automação com Puppeteer (headless: ${headless})...`);
+    
+    browser = await puppeteer.launch({
+      headless: headless,
+      defaultViewport: headless ? { width: 1920, height: 1080 } : null,
+      args: headless ? [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu'
+      ] : ['--start-maximized']
+    });
 
-      const pages = await browser.pages();
-      let page;
+    const pages = await browser.pages();
+    let page = pages.length > 0 ? pages[0] : await browser.newPage();
 
-      if (pages.length > 0) {
-        page = pages[0];
-        console.log('📄 Navegando para RHID...');
-        await page.goto(rhidUrl, { waitUntil: 'networkidle0', timeout: 30000 });
-      } else {
-        page = await browser.newPage();
-        await page.goto(rhidUrl, { waitUntil: 'networkidle0', timeout: 30000 });
-      }
+    console.log('📄 Navegando para RHID...');
+    await page.goto(rhidUrl, { waitUntil: 'networkidle0', timeout: 30000 });
 
-      // Aguarda a página carregar
-      await new Promise(resolve => setTimeout(resolve, 3000));
+    // Aguarda a página carregar
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // FAZ LOGIN NO RHID
-      await fazerLoginRHID(page, credenciais);
+    // FAZ LOGIN NO RHID
+    await fazerLoginRHID(page, credenciais);
 
-      // NAVEGA E PREENCHE FORMULÁRIO DE DESBLOQUEIO
-      if (dadosREP && dadosREP.numeroREP && dadosREP.senha) {
-        await navegarParaDesbloqueioREP(page, dadosREP);
-      } else {
-        console.log('⚠️ Dados do REP incompletos, navegando sem preenchimento automático');
-        await navegarParaDesbloqueioREP(page, null);
-      }
-
-      console.log('✅ Automação concluída!');
-
+    // NAVEGA E PREENCHE FORMULÁRIO DE DESBLOQUEIO
+    if (dadosREP && dadosREP.numeroREP && dadosREP.senha) {
+      await navegarParaDesbloqueioREP(page, dadosREP);
     } else {
-      // Modo headless
-      console.log('🌐 Iniciando automação headless...');
-      browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-      });
+      console.log('⚠️ Dados do REP incompletos, navegando sem preenchimento automático');
+      await navegarParaDesbloqueioREP(page, null);
+    }
 
-      const page = await browser.newPage();
-      await page.goto(rhidUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+    console.log('✅ Automação concluída!');
 
-      // FAZ LOGIN NO RHID
-      await fazerLoginRHID(page, credenciais);
-
-      // NAVEGA E PREENCHE FORMULÁRIO DE DESBLOQUEIO
-      if (dadosREP && dadosREP.numeroREP && dadosREP.senha) {
-        await navegarParaDesbloqueioREP(page, dadosREP);
-      }
-
-      // Não fecha o browser imediatamente - aguarda o processo completo
-      console.log('⏳ Mantendo sessão aberta para captura de resultado...');
+    // ✅ CORREÇÃO PRINCIPAL: Fecha o browser em modo headless após conclusão
+    if (headless && browser) {
+      console.log('🔒 Fechando browser headless...');
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Aguarda um pouco antes de fechar
+      await browser.close();
+      browser = null;
+      console.log('✅ Browser fechado com sucesso');
     }
 
     return {
@@ -596,14 +593,39 @@ async function openInChrome(query, headless = true, telefone = null, dadosREP = 
   } catch (error) {
     console.error("❌ Erro na automação:", error.message);
 
+    // Sempre fechar o browser em caso de erro
     if (browser) {
       try {
+        console.log('🔒 Fechando browser devido a erro...');
         await browser.close();
-      } catch (e) { }
+      } catch (e) {
+        console.log('⚠️ Erro ao fechar browser:', e.message);
+      }
     }
 
+    // Se falhar em modo headless, informa o erro
+    if (headless) {
+      if (callbackWhatsApp) {
+        await enviarResultadoWhatsApp(
+          `Erro na automação: ${error.message}`,
+          'erro',
+          telefone
+        );
+      }
+      
+      return {
+        success: false,
+        error: error.message,
+        query: query,
+        telefone: telefone,
+        headless: headless,
+        dadosREP: dadosREP
+      };
+    }
+
+    // Se falhar em modo não-headless, tenta abrir o browser manualmente
     const rhidUrl = `https://www.rhid.com.br/v2/#/login`;
-    return await justOpenInChromeBrowser(rhidUrl, query, telefone, headless, dadosREP);
+    return await justOpenInChromeBrowser(rhidUrl, query, telefone, dadosREP);
   }
 }
 

@@ -107,9 +107,9 @@ async function processarImagemREP(mediaBuffer, sender, empresaId) {
       }
 
       return {
-        resposta: `*Dados identificados:*\nREP: ${resultadoOCR.dadosREP.numeroREP}\nSenha: ${resultadoOCR.dadosREP.senha}\n\n*Processando desbloqueio...*`
-      };
-    } else {
+        resposta: `*Dados identificados:*\nREP: ${resultadoOCR.dadosREP.numeroREP}\nSenha: ${resultadoOCR.dadosREP.senha}\n\n*Processando desbloqueio, aguarde 2 minutos ...*`
+        };
+      } else {
       // ❌ DADOS INCOMPLETOS - MANTÉM USUÁRIO NO FLUXO
       let usuarioFluxo = usuariosEmFluxoREP.get(sender);
       
@@ -240,7 +240,7 @@ async function executarNavegacaoRHID(sender, telefoneLimpo, dadosREP, nomeEmpres
         }
       };
 
-      await searchInChrome('desbloqueio rep', false, telefoneLimpo, dadosREP, callbackResultado);
+      await searchInChrome('desbloqueio rep', true, telefoneLimpo, dadosREP, callbackResultado);
 
       console.log('✅ Navegação RHID concluída!');
     }

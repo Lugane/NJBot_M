@@ -10,6 +10,23 @@ const qrCodesGerados = {};
 
 const statusBots = {};
 
+// ✅ FUNÇÃO PARA ENVIAR MENU INTERATIVO
+async function enviarMenu(sock, sender, empresaNome) {
+  const menuMessage = {
+    text: `🏢 Menu Principal inteligente\n\n` +
+      `Selecione uma opção que eu possa ajudar:\n\n` +
+      `1️⃣ - REP bloqueado\n` +
+      `2️⃣ - Horários e Folha\n` +
+      `3️⃣ - Benefícios\n` +
+      `4️⃣ - Documentos\n` +
+      `5️⃣ - Falar com Atendente\n` +
+      `0️⃣ - Reiniciar menu\n\n` +
+      `*Digite o número da opção desejada*`
+  };
+
+  await sock.sendMessage(sender, menuMessage);
+}
+
 async function iniciarBot(empresa) {
   const pasta = path.join(__dirname, 'bots', empresa.nome, 'auth_info_baileys');
   if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
@@ -55,7 +72,6 @@ async function iniciarBot(empresa) {
       statusBots[empresa._id] = { conectado: true, ultimaAtualizacao: new Date() };
       console.log(`🤖 Conectado com sucesso: ${empresa.nome}`);
     }
-
   });
 
   const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
@@ -153,7 +169,7 @@ async function iniciarBot(empresa) {
 
       // Lista de comandos permitidos mesmo se fromMe
       const comandosPermitidosMesmoFromMe = [
-        '#bot', '#sair', '#encerrar', 'bot',
+        '#bot', '#sair', '#encerrar', 'bot', '#menu',
         '#humano', '#atendente', '#manual'
       ];
 
@@ -175,7 +191,7 @@ async function iniciarBot(empresa) {
       }
 
       const saudacoes = ['oi', 'olá', 'ola', 'bom dia', 'boa tarde', 'boa noite'];
-      const comandosEspeciais = ['#sair', '#bot', 'bot'];
+      const comandosEspeciais = ['#sair', '#bot', 'bot', '#menu'];
 
       // Comandos especiais
       if (comandosEspeciais.includes(textoLower)) {
@@ -187,6 +203,10 @@ async function iniciarBot(empresa) {
         if (textoLower === '#bot' || textoLower === 'bot') {
           atendimentosManuais[chaveAtendimento] = { ativo: false, iniciado: false, nomeEmpresa: empresaAtualizada.nome };
           await sock.sendMessage(sender, { text: '🤖 Atendimento automático ativado.' });
+          return;
+        }
+        if (textoLower === '#menu') {
+          await enviarMenu(sock, sender, empresaAtualizada.nome);
           return;
         }
       }
@@ -216,14 +236,83 @@ async function iniciarBot(empresa) {
         return;
       }
 
+      // ✅ TRATAMENTO DO MENU - DENTRO DA FUNÇÃO ASYNC
+      // ✅ TRATAMENTO DO MENU - DENTRO DA FUNÇÃO ASYNC
+      const opcoesMenu = {
+        '1': 'problema_ponto',
+        '2': 'horarios_folha',
+        '3': 'beneficios',
+        '4': 'documentos',
+        '5': 'atendente_humano',
+        '0': 'reiniciar'
+      };
+
+      if (opcoesMenu[texto]) {
+        const opcao = opcoesMenu[texto];
+
+        switch (opcao) {
+          case 'problema_ponto':
+            await sock.sendMessage(sender, {
+              text: '🔧 *Problemas no Ponto/REP*\n\nPor gentileza, use o seu celular para fotografar a tela do ponto que contém o REP e a Senha, e nos envie...'
+            });
+            break;
+
+          case 'horarios_folha':
+            await sock.sendMessage(sender, {
+              text: '⏰ *Horários e Folha*\n\nEm breve teremos informações sobre seu ponto eletrônico e folha de pagamento.'
+            });
+            break;
+
+          case 'beneficios':
+            await sock.sendMessage(sender, {
+              text: '🎁 *Benefícios*\n\nAqui você pode consultar informações sobre vale-transporte, vale-refeição e outros benefícios.'
+            });
+            break;
+
+          case 'documentos':
+            await sock.sendMessage(sender, {
+              text: '📄 *Documentos*\n\nEm breve você poderá solicitar holerites, declarações e outros documentos.'
+            });
+            break;
+
+          case 'atendente_humano':
+            atendimentosManuais[chaveAtendimento].ativo = true;
+            await sock.sendMessage(sender, {
+              text: '👨‍💼 *Falar com Atendente*\n\nSolicitação enviada ao atendente humano. Aguarde um momento.'
+            });
+            return;
+
+          case 'reiniciar':
+            // ✅ LIMPA COMPLETAMENTE O ESTADO DO USUÁRIO
+            delete atendimentosManuais[chaveAtendimento];
+
+            // ✅ LIMPA TAMBÉM O FLUXO REP SE EXISTIR
+            const handleMensagem = require('./handlers/chatbot');
+            // Você precisará exportar a variável usuariosEmFluxoREP do chatbot.js ou usar outra abordagem
+
+            await sock.sendMessage(sender, {
+              text: '🔄 *Conversa Reiniciada!*\n'
+            });
+            // ✅ REENVIA O MENU APÓS REINICIAR
+            await enviarMenu(sock, sender, empresaAtualizada.nome);
+            return;
+        }
+
+        // Não chama handleMensagem para opções de menu
+        return;
+      }
+
       // Saudação inicial
       if (saudacoes.includes(textoLower) && !atendimentosManuais[chaveAtendimento].iniciado) {
         atendimentosManuais[chaveAtendimento].iniciado = true;
         atendimentosManuais[chaveAtendimento].ultimoContato = new Date();
 
         await sock.sendMessage(sender, {
-          text: `Olá! 👋 Bem-vindo(a) à ${empresaAtualizada.nome}! Como posso te ajudar?`
+          text: `Olá! 👋 Bem-vindo(a) à Lugane AI!`
         });
+
+        // ✅ ENVIA O MENU APÓS SAUDAÇÃO
+        await enviarMenu(sock, sender, empresaAtualizada.nome);
         return;
       }
 
@@ -239,7 +328,7 @@ async function iniciarBot(empresa) {
         texto,
         sender,
         isMedia,
-        mediaBuffer   
+        mediaBuffer
       );
 
       await sock.sendMessage(sender, { text: resposta.resposta });
@@ -353,16 +442,6 @@ setInterval(() => {
   }
 }, 60 * 1000);
 
-module.exports = {
-  iniciarBot,
-  getQRCode,
-  reiniciarBot,
-  toggleBot,
-  deletarEmpresa,
-  statusBots
-};
-
-
 function enviarMensagemParaContato(nomeEmpresa, destinatario, mensagem, imagemBuffer = null) {
   const sock = bots[nomeEmpresa];
 
@@ -374,7 +453,7 @@ function enviarMensagemParaContato(nomeEmpresa, destinatario, mensagem, imagemBu
   try {
     // Envia apenas texto, ignorando imagemBuffer
     return sock.sendMessage(destinatario, {
-       text: mensagem
+      text: mensagem
     });
   } catch (error) {
     console.error('❌ Erro ao enviar mensagem:', error);
@@ -382,7 +461,6 @@ function enviarMensagemParaContato(nomeEmpresa, destinatario, mensagem, imagemBu
   }
 }
 
-// Adicione à exportação:
 module.exports = {
   iniciarBot,
   getQRCode,
@@ -390,5 +468,5 @@ module.exports = {
   toggleBot,
   deletarEmpresa,
   statusBots,
-  enviarMensagemParaContato  // ✅ NOVA FUNÇÃO
+  enviarMensagemParaContato
 };

@@ -1,33 +1,7 @@
-// backend/handlers/ocrHandler.js - VERSÃO COM FALLBACK SEGURO
+// backend/handlers/ocrHandler.js 
 const Tesseract = require('tesseract.js');
 const sharp = require('sharp');
 const axios = require('axios');
-const fs = require('fs');
-
-// Verifica se Google Vision está disponível
-let googleVisionDisponivel = false;
-let visionClient = null;
-
-try {
-  const vision = require('@google-cloud/vision');
-  
-  // ✅ VERIFICAÇÃO CORRIGIDA - Checa se existe arquivo de credenciais
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    const credenciaisPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-    
-    if (fs.existsSync(credenciaisPath)) {
-      visionClient = new vision.ImageAnnotatorClient();
-      googleVisionDisponivel = true;
-      console.log('✅ Google Vision configurado e disponível');
-    } else {
-      console.log('❌ Google Vision: Arquivo de credenciais não encontrado em:', credenciaisPath);
-    }
-  } else {
-    console.log('ℹ️ Google Vision: Variável GOOGLE_APPLICATION_CREDENTIALS não configurada');
-  }
-} catch (error) {
-  console.log('⚠️ Google Vision não disponível:', error.message);
-}
 
 async function removerSobreposicaoVermelha(bufferImagem) {
   try {
@@ -80,7 +54,6 @@ async function removerSobreposicaoVermelha(bufferImagem) {
 }
 
 // ESTRATÉGIA 1: TESSERACT (Local)
-
 async function processarComTesseract(bufferImagem) {
   try {
     console.log('🔍 [Tesseract] Iniciando processamento...');
@@ -196,62 +169,15 @@ async function processarComOCRSpace(bufferImagem) {
   }
 }
 
-// ESTRATÉGIA 3: GOOGLE VISION (Opcional - só se disponível)
-async function processarComGoogleVision(bufferImagem) {
-  if (!googleVisionDisponivel || !visionClient) {
-    throw new Error('Google Vision não disponível');
-  }
-
-  try {
-    console.log('☁️ [Google Vision] Iniciando...');
-
-    const imagemSemSobreposicao = await removerSobreposicaoVermelha(bufferImagem);
-    const [result] = await visionClient.textDetection({
-      image: { content: imagemSemSobreposicao.toString("base64") }
-    });
-
-    const detections = result.textAnnotations;
-
-    if (!detections || detections.length === 0) {
-      throw new Error('Nenhum texto detectado pelo Google Vision');
-    }
-
-    const texto = detections[0].description;
-    console.log(`✅ [Google Vision] Concluído!`);
-
-    const dadosREP = extrairDadosREPCorrigido(texto);
-
-    return {
-      sucesso: true,
-      provedor: 'google-vision',
-      textoBruto: texto,
-      confianca: 0.95,
-      dadosREP: dadosREP
-    };
-
-  } catch (error) {
-    console.error('❌ [Google Vision] Erro:', error.message);
-    throw error; // Propaga o erro para ser tratado no multi-OCR
-  }
-}
-
 // 🎯 ESTRATÉGIA PRINCIPAL: MULTI-OCR COM FALLBACK SEGURO
 async function processarImagemMultiploOCR(bufferImagem) {
   console.log('🚀 INICIANDO PROCESSAMENTO MULTI-ESTRATÉGIA OCR');
 
-  // Estratégias base (sempre disponíveis)
+  // Apenas as duas estratégias disponíveis
   const estrategias = [
     { nome: 'Tesseract', funcao: processarComTesseract },
     { nome: 'OCR.Space', funcao: processarComOCRSpace }
   ];
-
-  // ✅ CORREÇÃO: Só adiciona Google Vision se estiver realmente disponível
-  if (googleVisionDisponivel && visionClient) {
-    estrategias.push({ nome: 'Google Vision', funcao: processarComGoogleVision });
-    console.log('✅ Google Vision adicionado às estratégias');
-  } else {
-    console.log('ℹ️ Google Vision não adicionado (não disponível)');
-  }
 
   let melhorResultado = null;
   let tentativas = [];
@@ -474,7 +400,7 @@ function gerarRespostaOCR(dadosOCR) {
   let mensagem = `*Dados identificados (via ${provedor})*:\n`;
 
   if (dadosREP.numeroREP && dadosREP.senha) {
-    mensagem += `✅ REP: ${dados.numeroREP}\n✅ Senha: ${dados.senha}`;
+    mensagem += `✅ REP: ${dadosREP.numeroREP}\n✅ Senha: ${dadosREP.senha}`;
   } else if (dadosREP.numeroREP && !dadosREP.senha) {
     mensagem += `✅ REP: ${dadosREP.numeroREP}\n❌ Senha: Não identificada`;
   } else if (!dadosREP.numeroREP && dadosREP.senha) {
@@ -492,7 +418,6 @@ module.exports = {
   processarImagemOCR: processarImagemMultiploOCR,
   processarComTesseract,
   processarComOCRSpace,
-  processarComGoogleVision,
   extrairDadosREP: extrairDadosREPCorrigido,
   gerarRespostaOCR
 };
