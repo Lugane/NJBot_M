@@ -27,6 +27,36 @@ async function enviarMenu(sock, sender, empresaNome) {
   await sock.sendMessage(sender, menuMessage);
 }
 
+// ✅ FUNÇÃO PARA VALIDAR SE É UMA OPÇÃO VÁLIDA DO MENU
+function isValidMenuOption(texto) {
+  const opcoesValidas = ['1', '2', '3', '4', '5', '0'];
+  return opcoesValidas.includes(texto.trim());
+}
+
+// ✅ FUNÇÃO PARA VERIFICAR SE É UMA MENSAGEM FORA DO FLUXO
+function isMensagemForaDoFluxo(texto, atendimentoAtivo, fluxoREPAtivo) {
+  const textoLower = texto.toLowerCase().trim();
+  
+  // Comandos especiais permitidos
+  const comandosPermitidos = ['#sair', '#bot', '#menu', '#humano', '#atendente', '#manual'];
+  if (comandosPermitidos.some(c => textoLower.includes(c))) {
+    return false;
+  }
+  
+  // Se está em atendimento humano ou fluxo REP, permite qualquer mensagem
+  if (atendimentoAtivo || fluxoREPAtivo) {
+    return false;
+  }
+  
+  // Se é uma opção válida do menu, não é fora do fluxo
+  if (isValidMenuOption(texto)) {
+    return false;
+  }
+  
+  // Se não é nenhum dos casos acima, é mensagem fora do fluxo
+  return true;
+}
+
 async function iniciarBot(empresa) {
   const pasta = path.join(__dirname, 'bots', empresa.nome, 'auth_info_baileys');
   if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
@@ -78,6 +108,18 @@ async function iniciarBot(empresa) {
   const { WritableStreamBuffer } = require('stream-buffers');
   const handleMensagem = require('./handlers/chatbot');
   const { transcreverAudio } = require('./transcreverAudio');
+
+  // ✅ IMPORTAR FLUXO REP PARA VERIFICAR SE USUÁRIO ESTÁ NO FLUXO
+  let usuariosEmFluxoREP = new Map();
+  try {
+    const chatbotModule = require('./handlers/chatbot');
+    // Se o chatbot.js exporta a variável, podemos acessá-la
+    if (chatbotModule.usuariosEmFluxoREP) {
+      usuariosEmFluxoREP = chatbotModule.usuariosEmFluxoREP;
+    }
+  } catch (error) {
+    console.log('⚠️ Não foi possível acessar usuariosEmFluxoREP');
+  }
 
   sock.ev.on('messages.upsert', async (m) => {
     try {
@@ -197,6 +239,8 @@ async function iniciarBot(empresa) {
       if (comandosEspeciais.includes(textoLower)) {
         if (textoLower === '#sair') {
           delete atendimentosManuais[chaveAtendimento];
+          // ✅ LIMPA FLUXO REP TAMBÉM
+          usuariosEmFluxoREP.delete(sender);
           await sock.sendMessage(sender, { text: '✅ Conversa reiniciada. Digite "oi" para começar.' });
           return;
         }
@@ -236,8 +280,31 @@ async function iniciarBot(empresa) {
         return;
       }
 
-      // ✅ TRATAMENTO DO MENU - DENTRO DA FUNÇÃO ASYNC
-      // ✅ TRATAMENTO DO MENU - DENTRO DA FUNÇÃO ASYNC
+      // ✅ VERIFICA SE USUÁRIO ESTÁ NO FLUXO REP
+      const fluxoREPAtivo = usuariosEmFluxoREP.has(sender);
+
+      // ✅ VERIFICA SE É MENSAGEM FORA DO FLUXO (ANTES DO MENU)
+      if (isMensagemForaDoFluxo(texto, atendimentosManuais[chaveAtendimento]?.ativo, fluxoREPAtivo)) {
+        console.log(`⚠️ Mensagem fora do fluxo detectada: "${texto}"`);
+        
+        // Se já iniciou conversa mas enviou mensagem fora do menu, solicita seleção
+        if (atendimentosManuais[chaveAtendimento].iniciado) {
+          await sock.sendMessage(sender, {
+            text: `❌ *Opção não reconhecida*\n\n` +
+              `Por favor, selecione uma das opções do menu:\n\n` +
+              `1️⃣ - REP bloqueado\n` +
+              `2️⃣ - Horários e Folha\n` +
+              `3️⃣ - Benefícios\n` +
+              `4️⃣ - Documentos\n` +
+              `5️⃣ - Falar com Atendente\n` +
+              `0️⃣ - Reiniciar menu\n\n` +
+              `*Digite apenas o número da opção desejada*`
+          });
+          return;
+        }
+      }
+
+      // ✅ TRATAMENTO DO MENU
       const opcoesMenu = {
         '1': 'problema_ponto',
         '2': 'horarios_folha',
@@ -285,10 +352,7 @@ async function iniciarBot(empresa) {
           case 'reiniciar':
             // ✅ LIMPA COMPLETAMENTE O ESTADO DO USUÁRIO
             delete atendimentosManuais[chaveAtendimento];
-
-            // ✅ LIMPA TAMBÉM O FLUXO REP SE EXISTIR
-            const handleMensagem = require('./handlers/chatbot');
-            // Você precisará exportar a variável usuariosEmFluxoREP do chatbot.js ou usar outra abordagem
+            usuariosEmFluxoREP.delete(sender);
 
             await sock.sendMessage(sender, {
               text: '🔄 *Conversa Reiniciada!*\n'
@@ -331,7 +395,9 @@ async function iniciarBot(empresa) {
         mediaBuffer
       );
 
-      await sock.sendMessage(sender, { text: resposta.resposta });
+      if (resposta.resposta) {
+        await sock.sendMessage(sender, { text: resposta.resposta });
+      }
 
     } catch (err) {
       console.error('❌ Erro no processamento da mensagem:', err);
