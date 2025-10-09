@@ -34,27 +34,24 @@ function isValidMenuOption(texto) {
 }
 
 // ✅ FUNÇÃO PARA VERIFICAR SE É UMA MENSAGEM FORA DO FLUXO
-function isMensagemForaDoFluxo(texto, atendimentoAtivo, fluxoREPAtivo) {
+function isMensagemForaDoFluxo(texto, atendimentoAtivo, fluxoREPAtivo, isMedia) {
   const textoLower = texto.toLowerCase().trim();
-  
+
+  // ✅ SE É MÍDIA (FOTO), NUNCA É FORA DO FLUXO
+  if (isMedia) {
+    return false;
+  }
+
   // Comandos especiais permitidos
   const comandosPermitidos = ['#sair', '#bot', '#menu', '#humano', '#atendente', '#manual'];
   if (comandosPermitidos.some(c => textoLower.includes(c))) {
     return false;
   }
-  
+
   // Se está em atendimento humano ou fluxo REP, permite qualquer mensagem
   if (atendimentoAtivo || fluxoREPAtivo) {
     return false;
   }
-  
-  // Se é uma opção válida do menu, não é fora do fluxo
-  if (isValidMenuOption(texto)) {
-    return false;
-  }
-  
-  // Se não é nenhum dos casos acima, é mensagem fora do fluxo
-  return true;
 }
 
 async function iniciarBot(empresa) {
@@ -284,9 +281,9 @@ async function iniciarBot(empresa) {
       const fluxoREPAtivo = usuariosEmFluxoREP.has(sender);
 
       // ✅ VERIFICA SE É MENSAGEM FORA DO FLUXO (ANTES DO MENU)
-      if (isMensagemForaDoFluxo(texto, atendimentosManuais[chaveAtendimento]?.ativo, fluxoREPAtivo)) {
+      if (isMensagemForaDoFluxo(texto, atendimentosManuais[chaveAtendimento]?.ativo, fluxoREPAtivo, isMedia)) {
         console.log(`⚠️ Mensagem fora do fluxo detectada: "${texto}"`);
-        
+
         // Se já iniciou conversa mas enviou mensagem fora do menu, solicita seleção
         if (atendimentosManuais[chaveAtendimento].iniciado) {
           await sock.sendMessage(sender, {
@@ -325,8 +322,20 @@ async function iniciarBot(empresa) {
             break;
 
           case 'horarios_folha':
+            try {
+              const chatbotModule = require('./handlers/chatbot');
+              if (chatbotModule.usuariosEmConsultaFuncionario) {
+                chatbotModule.usuariosEmConsultaFuncionario.set(sender, {
+                  etapa: 'aguardando_nome',
+                  tentativas: 0
+                });
+              }
+            } catch (error) {
+              console.error('❌ Erro ao ativar fluxo de consulta:', error);
+            }
+
             await sock.sendMessage(sender, {
-              text: '⏰ *Horários e Folha*\n\nEm breve teremos informações sobre seu ponto eletrônico e folha de pagamento.'
+              text: '👤 *Consulta de Funcionário*\n\n📝 Por favor, digite o *NOME COMPLETO* ou *CPF* do funcionário que deseja consultar:'
             });
             break;
 

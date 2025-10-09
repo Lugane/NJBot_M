@@ -4,63 +4,205 @@ const { gerarRespostaGemini } = require('../gemini');
 const { processarImagemOCR, gerarRespostaOCR } = require('./ocrHandler');
 const { enviarMensagemParaContato } = require('../botManager');
 
-// Importação condicional para evitar erro de módulo
+// Importação condicional dos módulos
 let searchInChrome;
+let consultarFuncionario;
+
 try {
   const chromeModule = require('../DesbloqueioREP');
   searchInChrome = chromeModule.searchInChrome;
 } catch (error) {
-  console.log('⚠️ Módulo DesbloqueioREP não encontrado, funcionalidade de pesquisa desativada');
+  console.log('⚠️ Módulo DesbloqueioREP não encontrado');
   searchInChrome = null;
 }
 
-// Variável para controlar estado da conversa
-const usuariosEmFluxoREP = new Map();
+try {
+  const funcionarioModule = require('../CadastroFuncionarios');
+  consultarFuncionario = funcionarioModule.consultarFuncionario;
+  console.log('✅ Módulo CadastroFuncionarios carregado.');
+} catch (err) {
+  console.error('❌ Erro ao carregar CadastroFuncionarios:', err.message);
+  consultarFuncionario = null;
+}
 
+// Variáveis para controle de estado da conversa
+const usuariosEmFluxoREP = new Map();
+const usuariosEmConsultaFuncionario = new Map();
+
+/**
+ * FUNÇÃO PRINCIPAL - Processa todas as mensagens recebidas
+ */
 async function handleMensagem(empresaId, mensagemUsuario, sender = null, isMedia = false, mediaBuffer = null) {
   try {
     const empresa = await Empresa.findById(empresaId);
-    if (!empresa) return { resposta: '⚠️ Empresa não encontrada.' };
+    if (!empresa) {
+      return { resposta: '⚠️ Empresa não encontrada.' };
+    }
 
-    // ✅ 1. PRIMEIRO: Verifica se é uma IMAGEM do REP
+    // ✅ 1. VERIFICA SE É UMA IMAGEM DO REP
     if (isMedia && mediaBuffer) {
-      return await processarImagemREP(mediaBuffer, sender, empresaId); // ✅ Passa empresaId
+      return await processarImagemREP(mediaBuffer, sender, empresaId);
     }
 
-    // ✅ 2. SEGUNDO: Verifica se usuário está em fluxo ativo
+    // ✅ 2. VERIFICA SE USUÁRIO ESTÁ EM FLUXO DE CONSULTA DE FUNCIONÁRIO
+    if (usuariosEmConsultaFuncionario.has(sender)) {
+      return await processarConsultaFuncionario(mensagemUsuario, sender, empresa);
+    }
+
+    // ✅ 3. VERIFICA SE USUÁRIO ESTÁ EM FLUXO DE DESBLOQUEIO REP
     if (usuariosEmFluxoREP.has(sender)) {
-      return await continuarFluxoREP(mensagemUsuario, sender);
+      return await processarFluxoREP(mensagemUsuario, sender);
     }
 
-    // ✅ 3. TERCEIRO: Verifica se é problema no ponto (ativa fluxo)
+    // ✅ 4. VERIFICA SE É PROBLEMA NO PONTO (ativa fluxo)
     const resultadoProblemaPonto = await verificarProblemaPonto(mensagemUsuario, sender);
     if (resultadoProblemaPonto.deveResponder) {
       return { resposta: resultadoProblemaPonto.resposta };
     }
 
-    // ✅ 4. QUARTO: Usa IA normal para outras mensagens
-    const promptCompleto = `${empresa.promptIA}\nUsuário: ${mensagemUsuario}\nIA:`;
-    const respostaIA = await gerarRespostaGemini(promptCompleto, mensagemUsuario);
+    // ✅ 5. VERIFICA SE É CONSULTA DE FUNCIONÁRIO (ativa fluxo)
+    const resultadoConsultaFuncionario = await verificarConsultaFuncionario(mensagemUsuario, sender);
+    if (resultadoConsultaFuncionario.deveResponder) {
+      return { resposta: resultadoConsultaFuncionario.resposta };
+    }
 
-    return {
-      resposta: respostaIA
-    };
+    // ✅ 6. USA IA GEMINI PARA OUTRAS MENSAGENS
+    return await processarMensagemIA(mensagemUsuario, empresa);
+
   } catch (error) {
     console.error('❌ Erro no handleMensagem:', error);
     return { resposta: '⚠️ Ocorreu um erro ao processar sua mensagem.' };
   }
 }
 
-// ✅ FUNÇÃO PARA VERIFICAR PROBLEMAS NO PONTO
+/**
+ * PROCESSAR IMAGEM DO REP
+ */
+async function processarImagemREP(mediaBuffer, sender, empresaId) {
+  try {
+    console.log('📸 Processando imagem do REP...');
+
+    const resultadoOCR = await processarImagemOCR(mediaBuffer);
+
+    if (resultadoOCR.sucesso && resultadoOCR.dadosREP.numeroREP && resultadoOCR.dadosREP.senha) {
+      // ✅ DADOS COMPLETOS - EXECUTA DESBLOQUEIO
+      const telefoneLimpo = sender ? sender.replace('@s.whatsapp.net', '').replace(/\D/g, '') : null;
+      const empresa = await Empresa.findById(empresaId);
+      const nomeEmpresa = empresa ? empresa.nome : null;
+
+      usuariosEmFluxoREP.delete(sender);
+
+      if (searchInChrome && nomeEmpresa) {
+        executarDesbloqueioREP(sender, telefoneLimpo, resultadoOCR.dadosREP, nomeEmpresa);
+      }
+
+      return {
+        resposta: `✅ *Dados identificados com sucesso!*\n\n` +
+                 `🔢 *REP:* ${resultadoOCR.dadosREP.numeroREP}\n` +
+                 `🔑 *Senha:* ${resultadoOCR.dadosREP.senha}\n\n` +
+                 `🔄 *Processando desbloqueio...*\n` +
+                 `_Aguarde aproximadamente 1 minuto_`
+      };
+    } else {
+      // ❌ DADOS INCOMPLETOS - MANTÉM NO FLUXO
+      return await processarImagemIncompleta(resultadoOCR, sender);
+    }
+
+  } catch (error) {
+    console.error('❌ Erro ao processar imagem REP:', error);
+    return await processarErroImagem(sender);
+  }
+}
+
+/**
+ * PROCESSAR IMAGEM COM DADOS INCOMPLETOS
+ */
+async function processarImagemIncompleta(resultadoOCR, sender) {
+  let usuarioFluxo = usuariosEmFluxoREP.get(sender) || {
+    etapa: 'aguardando_imagem',
+    tentativas: 0,
+    dados: {}
+  };
+
+  usuarioFluxo.tentativas += 1;
+  usuariosEmFluxoREP.set(sender, usuarioFluxo);
+
+  let resposta = '';
+  const temDadosParciais = resultadoOCR.dadosREP.numeroREP || resultadoOCR.dadosREP.senha;
+
+  if (temDadosParciais) {
+    resposta = `📋 *Dados parciais identificados:*\n\n`;
+    if (resultadoOCR.dadosREP.numeroREP) {
+      resposta += `✅ REP: ${resultadoOCR.dadosREP.numeroREP}\n`;
+    } else {
+      resposta += `❌ REP: Não identificado\n`;
+    }
+
+    if (resultadoOCR.dadosREP.senha) {
+      resposta += `✅ Senha: ${resultadoOCR.dadosREP.senha}\n`;
+    } else {
+      resposta += `❌ Senha: Não identificada\n`;
+    }
+
+    resposta += `\n📸 *Envie outra foto mais nítida* para completar os dados.`;
+  } else {
+    resposta = `❌ *Não consegui identificar os dados do REP*\n\n` +
+               `📸 *Por favor, envie outra foto mais nítida* mostrando:\n` +
+               `• Número do REP (15-18 dígitos)\n` +
+               `• Senha/Contra Senha (10 dígitos)\n\n` +
+               `💡 *Dica:* Garanta boa iluminação e foco na área dos números.`;
+  }
+
+  // ✅ VERIFICA MÁXIMO DE TENTATIVAS
+  if (usuarioFluxo.tentativas >= 3) {
+    usuariosEmFluxoREP.delete(sender);
+    resposta += `\n\n⚠️ *Máximo de tentativas atingido (3).*\n` +
+                `_Entre em contato com o suporte técnico para assistência personalizada._`;
+  } else {
+    resposta += `\n\n🔄 _Tentativa ${usuarioFluxo.tentativas} de 3_`;
+  }
+
+  return { resposta };
+}
+
+/**
+ * PROCESSAR ERRO NA IMAGEM
+ */
+async function processarErroImagem(sender) {
+  let usuarioFluxo = usuariosEmFluxoREP.get(sender) || {
+    etapa: 'aguardando_imagem',
+    tentativas: 0,
+    dados: {}
+  };
+
+  usuarioFluxo.tentativas += 1;
+  usuariosEmFluxoREP.set(sender, usuarioFluxo);
+
+  let resposta = '❌ *Erro ao processar a imagem*\n\n';
+
+  if (usuarioFluxo.tentativas < 3) {
+    resposta += `📸 *Envie outra foto mais nítida* do REP.\n\n` +
+                `🔄 _Tentativa ${usuarioFluxo.tentativas} de 3_`;
+  } else {
+    usuariosEmFluxoREP.delete(sender);
+    resposta += `⚠️ *Máximo de tentativas atingido.*\n` +
+                `_Entre em contato com o suporte técnico para assistência adicional._`;
+  }
+
+  return { resposta };
+}
+
+/**
+ * VERIFICAR PROBLEMAS NO PONTO
+ */
 async function verificarProblemaPonto(mensagem, sender) {
   const texto = mensagem.toLowerCase().trim();
 
-  // PALAVRAS-CHAVE QUE ATIVAM O FLUXO DE PROBLEMAS NO PONTO
   const palavrasProblemaPonto = [
     'não acessa', 'ponto não acessa', 'ponto parou', 'ponto bloqueado',
     'problema no ponto', 'problema ponto', 'ponto com erro', 'erro no ponto',
     'rep bloqueado', 'rep não funciona', '1602', '1603', 'desbloquear rep',
-    'rep travado', 'ponto travado'
+    'rep travado', 'ponto travado', 'desbloqueio'
   ];
 
   const deveAtivarFluxo = palavrasProblemaPonto.some(palavra => texto.includes(palavra));
@@ -69,7 +211,7 @@ async function verificarProblemaPonto(mensagem, sender) {
     return { deveResponder: false };
   }
 
-  // ATIVA O FLUXO PARA ESTE USUÁRIO
+  // ✅ ATIVA O FLUXO DE DESBLOQUEIO
   usuariosEmFluxoREP.set(sender, {
     etapa: 'aguardando_imagem',
     tentativas: 0,
@@ -80,116 +222,95 @@ async function verificarProblemaPonto(mensagem, sender) {
     deveResponder: true,
     resposta: `🔧 **Identifiquei um problema no ponto!**\n\n` +
       `📸 **Para ajudar, preciso que você envie uma FOTO do REP** mostrando:\n\n` +
-      `• **Número do REP**\n` +
-      `• **Senha/Contra Senha**\n\n` +
+      `• **Número do REP** (15-18 dígitos)\n` +
+      `• **Senha/Contra Senha** (10 dígitos)\n\n` +
       `_Com essas informações, posso acessar o sistema e ajudar no desbloqueio!_`
   };
 }
 
-// ✅ FUNÇÃO PARA PROCESSAR IMAGEM DO REP
-async function processarImagemREP(mediaBuffer, sender, empresaId) {
-  try {
-    console.log('📸 Processando imagem do REP...');
+/**
+ * VERIFICAR CONSULTA DE FUNCIONÁRIO
+ */
+async function verificarConsultaFuncionario(mensagem, sender) {
+  const texto = mensagem.toLowerCase().trim();
 
-    const resultadoOCR = await processarImagemOCR(mediaBuffer);
+  const palavrasConsultaFuncionario = [
+    'consultar funcionário', 'dados do funcionário', 'matrícula',
+    'cargo', 'dados cadastrais', 'informações do funcionário',
+    'funcionário', 'colaborador', 'ficha do funcionário'
+  ];
 
-    if (resultadoOCR.sucesso && resultadoOCR.dadosREP.numeroREP && resultadoOCR.dadosREP.senha) {
-      const telefoneLimpo = sender ? sender.replace('@s.whatsapp.net', '').replace(/\D/g, '') : null;
+  const deveAtivarFluxo = palavrasConsultaFuncionario.some(palavra => texto.includes(palavra));
 
-      // Busca o nome da empresa
-      const empresa = await Empresa.findById(empresaId);
-      const nomeEmpresa = empresa ? empresa.nome : null;
+  if (!deveAtivarFluxo) {
+    return { deveResponder: false };
+  }
 
-      usuariosEmFluxoREP.delete(sender);
+  // ✅ ATIVA O FLUXO DE CONSULTA
+  usuariosEmConsultaFuncionario.set(sender, {
+    etapa: 'aguardando_nome',
+    tentativas: 0
+  });
 
-      if (searchInChrome && nomeEmpresa) {
-        executarNavegacaoRHID(sender, telefoneLimpo, resultadoOCR.dadosREP, nomeEmpresa);
+  return {
+    deveResponder: true,
+    resposta: `👤 **Consulta de Funcionário**\n\n` +
+      `📝 Por favor, digite o *nome completo* do funcionário que deseja consultar:`
+  };
+}
+
+/**
+ * PROCESSAR CONSULTA DE FUNCIONÁRIO
+ */
+async function processarConsultaFuncionario(mensagem, sender, empresa) {
+  const fluxoUsuario = usuariosEmConsultaFuncionario.get(sender);
+
+  if (fluxoUsuario.etapa === 'aguardando_nome') {
+    const nomeFuncionario = mensagem.trim();
+
+    if (nomeFuncionario.length < 3) {
+      fluxoUsuario.tentativas += 1;
+
+      if (fluxoUsuario.tentativas >= 3) {
+        usuariosEmConsultaFuncionario.delete(sender);
+        return {
+          resposta: `❌ *Máximo de tentativas atingido*\n\n` +
+                   `Por favor, use o menu para tentar novamente.`
+        };
       }
 
       return {
-        resposta: `*Dados identificados:*\nREP: ${resultadoOCR.dadosREP.numeroREP}\nSenha: ${resultadoOCR.dadosREP.senha}\n\n*Processando desbloqueio, aguarde 2 minutos ...*`
-        };
-      } else {
-      // ❌ DADOS INCOMPLETOS - MANTÉM USUÁRIO NO FLUXO
-      let usuarioFluxo = usuariosEmFluxoREP.get(sender);
-      
-      // Se não existe fluxo, cria um novo
-      if (!usuarioFluxo) {
-        usuarioFluxo = {
-          etapa: 'aguardando_imagem',
-          tentativas: 0,
-          dados: {}
-        };
-      }
-      
-      usuarioFluxo.tentativas += 1;
-      usuariosEmFluxoREP.set(sender, usuarioFluxo); // ✅ MANTÉM NO FLUXO
-
-      let resposta = '';
-
-      if (resultadoOCR.dadosREP.numeroREP || resultadoOCR.dadosREP.senha) {
-        // Dados parciais
-        resposta = `*Dados parciais identificados:*\n`;
-        if (resultadoOCR.dadosREP.numeroREP) resposta += `✅ REP: ${resultadoOCR.dadosREP.numeroREP}\n`;
-        else resposta += `❌ REP: Não identificado\n`;
-
-        if (resultadoOCR.dadosREP.senha) resposta += `✅ Senha: ${resultadoOCR.dadosREP.senha}\n`;
-        else resposta += `❌ Senha: Não identificada\n`;
-
-        resposta += `\n📸 *Envie outra foto mais nítida* para completar os dados.`;
-      } else {
-        // Nenhum dado encontrado
-        resposta = `❌ *Não consegui identificar os dados do REP*\n\n` +
-          `📸 *Por favor, envie outra foto mais nítida* mostrando:\n` +
-          `• Número do REP (15-18 dígitos)\n` +
-          `• Senha/Contra Senha (10 dígitos)\n\n` +
-          `_Dica: Garanta boa iluminação e foco na área dos números._`;
-      }
-
-      // ✅ SE EXCEDEU TENTATIVAS, FINALIZA O FLUXO COM SUGESTÃO
-      if (usuarioFluxo.tentativas >= 3) {
-        usuariosEmFluxoREP.delete(sender);
-        resposta += `\n\n⚠️ *Máximo de tentativas atingido (3).*\n` +
-          `_Entre em contato com o suporte técnico para assistência personalizada._`;
-      } else {
-        resposta += `\n\n_Tentativa ${usuarioFluxo.tentativas} de 3_`;
-      }
-
-      return { resposta };
-    }
-
-  } catch (error) {
-    console.error('❌ Erro ao processar imagem REP:', error);
-    
-    // ✅ MANTÉM O FLUXO MESMO EM CASO DE ERRO
-    let usuarioFluxo = usuariosEmFluxoREP.get(sender);
-    if (!usuarioFluxo) {
-      usuarioFluxo = {
-        etapa: 'aguardando_imagem',
-        tentativas: 0,
-        dados: {}
+        resposta: `❌ *Nome muito curto*\n\n` +
+                 `Digite o *nome completo* do funcionário (mínimo 3 caracteres):\n` +
+                 `_Tentativa ${fluxoUsuario.tentativas} de 3_`
       };
     }
-    
-    usuarioFluxo.tentativas += 1;
-    usuariosEmFluxoREP.set(sender, usuarioFluxo);
 
-    let resposta = '❌ Erro ao processar a imagem. ';
-    
-    if (usuarioFluxo.tentativas < 3) {
-      resposta += `📸 *Envie outra foto mais nítida* do REP.\n\n_Tentativa ${usuarioFluxo.tentativas} de 3_`;
-    } else {
-      usuariosEmFluxoREP.delete(sender);
-      resposta += `\n\n⚠️ *Máximo de tentativas atingido.*\n` +
-        `_Entre em contato com o suporte técnico para assistência adicional._`;
+    // ✅ REMOVE DO FLUXO E EXECUTA CONSULTA
+    usuariosEmConsultaFuncionario.delete(sender);
+
+    const telefoneLimpo = sender ? sender.replace('@s.whatsapp.net', '').replace(/\D/g, '') : null;
+
+    if (consultarFuncionario && empresa.nome && telefoneLimpo) {
+      executarConsultaFuncionario(sender, telefoneLimpo, nomeFuncionario, empresa.nome);
     }
 
-    return { resposta };
+    return {
+      resposta: `🔍 **Consultando dados de:** ${nomeFuncionario}\n\n` +
+               `📊 Estou buscando as informações no sistema...\n` +
+               `⏳ _Aguarde 1 minuto e lhe retorno da realização do processo_`
+    };
   }
+
+  // ✅ LIMPA FLUXO SE NÃO RECONHECIDO
+  usuariosEmConsultaFuncionario.delete(sender);
+  return { deveResponder: false };
 }
 
-// ✅ FUNÇÃO PARA CONTINUAR FLUXO ATIVO
-async function continuarFluxoREP(mensagem, sender) {
+/**
+ * PROCESSAR FLUXO REP ATIVO
+ */
+async function processarFluxoREP(mensagem, sender) {
   const fluxoUsuario = usuariosEmFluxoREP.get(sender);
 
   if (fluxoUsuario.etapa === 'aguardando_imagem') {
@@ -204,12 +325,104 @@ async function continuarFluxoREP(mensagem, sender) {
     };
   }
 
-  // Limpa fluxo se não reconhece
+  // ✅ LIMPA FLUXO SE NÃO RECONHECIDO
   usuariosEmFluxoREP.delete(sender);
   return { deveResponder: false };
 }
 
-// ✅ FUNÇÃO PARA ENVIAR MENSAGEM VIA WHATSAPP
+/**
+ * PROCESSAR MENSAGEM COM IA GEMINI
+ */
+async function processarMensagemIA(mensagemUsuario, empresa) {
+  try {
+    const promptCompleto = `${empresa.promptIA}\nUsuário: ${mensagemUsuario}\nIA:`;
+    const respostaIA = await gerarRespostaGemini(promptCompleto, mensagemUsuario);
+
+    return {
+      resposta: respostaIA
+    };
+  } catch (error) {
+    console.error('❌ Erro ao gerar resposta IA:', error);
+    return {
+      resposta: `🤖 **Assistente Lugane AI**\n\n` +
+               `No momento, estou com dificuldades técnicas.\n` +
+               `Por favor, tente novamente ou entre em contato com o suporte.`
+    };
+  }
+}
+
+/**
+ * EXECUTAR DESBLOQUEIO REP
+ */
+async function executarDesbloqueioREP(sender, telefoneLimpo, dadosREP, nomeEmpresa) {
+  try {
+    if (searchInChrome) {
+      console.log(`🌐 Iniciando desbloqueio REP para: ${telefoneLimpo}`);
+
+      const callbackResultado = async (mensagem) => {
+        try {
+          console.log(`📤 Callback desbloqueio - Enviando para WhatsApp`);
+          await enviarMensagemWhatsApp(sender, mensagem, null, nomeEmpresa);
+        } catch (error) {
+          console.error('❌ Erro no callback desbloqueio:', error);
+        }
+      };
+
+      await searchInChrome('desbloqueio rep', true, telefoneLimpo, dadosREP, callbackResultado);
+      console.log('✅ Desbloqueio REP em execução!');
+    }
+  } catch (error) {
+    console.error('❌ Erro no desbloqueio REP:', error);
+    await enviarMensagemWhatsApp(
+      sender,
+      '❌ *Erro no desbloqueio*\n\nOcorreu um erro ao processar o desbloqueio. Tente novamente.',
+      null,
+      nomeEmpresa
+    );
+  }
+}
+
+/**
+ * EXECUTAR CONSULTA DE FUNCIONÁRIO
+ */
+async function executarConsultaFuncionario(sender, telefoneLimpo, nomeFuncionario, nomeEmpresa) {
+  try {
+    if (consultarFuncionario) {
+      console.log(`👤 Iniciando consulta de funcionário para: ${telefoneLimpo}`);
+
+      const callbackResultado = async (mensagem) => {
+        try {
+          console.log(`📤 Callback consulta - Enviando para WhatsApp`);
+          await enviarMensagemWhatsApp(sender, mensagem, null, nomeEmpresa);
+        } catch (error) {
+          console.error('❌ Erro no callback consulta:', error);
+        }
+      };
+
+      await consultarFuncionario(nomeFuncionario, false, telefoneLimpo, callbackResultado);
+      console.log('✅ Consulta de funcionário em execução!');
+    } else {
+      await enviarMensagemWhatsApp(
+        sender,
+        '❌ *Serviço indisponível*\n\nA consulta de funcionários não está disponível no momento.',
+        null,
+        nomeEmpresa
+      );
+    }
+  } catch (error) {
+    console.error('❌ Erro na consulta de funcionário:', error);
+    await enviarMensagemWhatsApp(
+      sender,
+      '❌ *Erro na consulta*\n\nOcorreu um erro ao consultar os dados. Tente novamente.',
+      null,
+      nomeEmpresa
+    );
+  }
+}
+
+/**
+ * ENVIAR MENSAGEM VIA WHATSAPP
+ */
 async function enviarMensagemWhatsApp(sender, mensagem, imagemBuffer = null, nomeEmpresa) {
   try {
     console.log(`📤 Enviando mensagem para ${sender}`);
@@ -224,43 +437,7 @@ async function enviarMensagemWhatsApp(sender, mensagem, imagemBuffer = null, nom
   }
 }
 
-// ✅ FUNÇÃO PARA EXECUTAR NAVEGAÇÃO RHID - VERSÃO COM CALLBACK
-async function executarNavegacaoRHID(sender, telefoneLimpo, dadosREP, nomeEmpresa) {
-  try {
-    if (searchInChrome) {
-      console.log(`🌐 Iniciando navegação RHID para: ${telefoneLimpo}`);
-
-      // ✅ CALLBACK ATUALIZADO
-      const callbackResultado = async (mensagem, imagemBuffer = null) => {
-        try {
-          console.log(`📤 Callback ativado - Enviando para WhatsApp`);
-          await enviarMensagemWhatsApp(sender, mensagem, imagemBuffer, nomeEmpresa);
-        } catch (error) {
-          console.error('❌ Erro no callback:', error);
-        }
-      };
-
-      await searchInChrome('desbloqueio rep', true, telefoneLimpo, dadosREP, callbackResultado);
-
-      console.log('✅ Navegação RHID concluída!');
-    }
-  } catch (error) {
-    console.error('❌ Erro na navegação RHID:', error);
-  }
-}
-
-// ✅ FUNÇÃO LEGADA (mantida para compatibilidade)
-async function executarPesquisaEmSegundoPlano(query, sender, headless = false, telefone = null) {
-  try {
-    if (searchInChrome) {
-      const resultado = await searchInChrome(query, headless, telefone);
-      if (resultado.success) {
-        console.log(`✅ Navegação concluída para: ${telefone || 'N/A'}`);
-      }
-    }
-  } catch (error) {
-    console.error('❌ Erro na navegação:', error);
-  }
-}
-
+// ✅ EXPORTAÇÕES PARA INTEGRAÇÃO COM BOTMANAGER
 module.exports = handleMensagem;
+module.exports.usuariosEmFluxoREP = usuariosEmFluxoREP;
+module.exports.usuariosEmConsultaFuncionario = usuariosEmConsultaFuncionario;

@@ -511,7 +511,7 @@ async function openInChrome(query, headless = true, telefone = null, dadosREP = 
     // Busca credenciais baseadas no telefone
     let credenciais = null;
     if (telefone) {
-      credenciais = getCredenciaisRHID(telefone);
+      credenciais = getCredenciaisRHID(telefone, 'menu1'); // ← FORÇA menu1
       if (credenciais) {
         console.log(`🔑 Credenciais encontradas para: ${credenciais.usuario}`);
       } else {
