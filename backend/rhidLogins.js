@@ -9,7 +9,7 @@ function getCredenciaisRHID(telefone, menuSelecionado = null) {
       },
       // ✅ Menu 2 (Horários e Folha) - Cocobambu
       menu2: {
-        usuario: 'lugane@cocobambu.com',
+        usuario: 'luganemobile@gmail.com',
         senha: 'Lock203001'
       }
     },
@@ -21,7 +21,7 @@ function getCredenciaisRHID(telefone, menuSelecionado = null) {
       },
       // ✅ Menu 2 (Horários e Folha) - Cocobambu
       menu2: {
-        usuario: 'lugane@cocobambu.com',
+        usuario: 'luganemobile@gmail.com',
         senha: 'Lock203001'
       }
     },
@@ -33,7 +33,7 @@ function getCredenciaisRHID(telefone, menuSelecionado = null) {
       },
       // ✅ Menu 2 (Horários e Folha) - Cocobambu
       menu2: {
-        usuario: 'lugane@cocobambu.com',
+        usuario: 'luganemobile@gmail.com',
         senha: 'Lock203001'
       }
     },
@@ -45,7 +45,7 @@ function getCredenciaisRHID(telefone, menuSelecionado = null) {
       },
       // ✅ Menu 2 (Horários e Folha) - Cocobambu
       menu2: {
-        usuario: 'lugane@cocobambu.com',
+        usuario: 'luganemobile@gmail.com',
         senha: 'Lock203001'
       }
     }
