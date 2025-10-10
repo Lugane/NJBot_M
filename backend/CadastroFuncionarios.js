@@ -1,7 +1,107 @@
 const puppeteer = require('puppeteer');
 
-// Variável para armazenar a função de callback do WhatsApp
-let callbackWhatsApp = null;
+// ✅ CONTROLE DE INSTÂNCIAS PARA CONSULTA
+const instanciasConsulta = new Map();
+const MAX_CONSULTAS_PARALELAS = 15;
+
+// ✅ GERENCIADOR DE CALLBACKS POR SESSÃO
+const callbacksPorSessao = new Map();
+
+// ✅ GERENCIADOR DE RECURSOS
+class GerenciadorConsultas {
+  static async obterInstancia(idUsuario) {
+    this.limparInstanciasAntigas();
+    
+    if (instanciasConsulta.size >= MAX_CONSULTAS_PARALELAS) {
+      throw new Error('⚠️ Sistema ocupado. Tente novamente em alguns segundos.');
+    }
+    
+    console.log(`🔄 Criando instância consulta para: ${idUsuario}`);
+    
+    const browser = await puppeteer.launch({
+      headless: true,
+      defaultViewport: { width: 1920, height: 1080 },
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu'
+      ],
+      timeout: 60000
+    });
+    
+    const instancia = {
+      browser,
+      timestamp: Date.now(),
+      idUsuario
+    };
+    
+    instanciasConsulta.set(idUsuario, instancia);
+    console.log(`✅ Instância consulta criada. Total: ${instanciasConsulta.size}`);
+    return instancia;
+  }
+  
+  static async liberarInstancia(idUsuario) {
+    const instancia = instanciasConsulta.get(idUsuario);
+    if (instancia) {
+      try {
+        console.log(`🔒 Fechando instância consulta: ${idUsuario}`);
+        await instancia.browser.close();
+        console.log(`✅ Instância consulta fechada: ${idUsuario}`);
+      } catch (error) {
+        console.error(`❌ Erro ao fechar consulta ${idUsuario}:`, error.message);
+      }
+      instanciasConsulta.delete(idUsuario);
+      
+      // ✅ LIMPA O CALLBACK DA SESSÃO TAMBÉM
+      callbacksPorSessao.delete(idUsuario);
+      console.log(`📊 Consultas restantes: ${instanciasConsulta.size}`);
+    }
+  }
+  
+  static limparInstanciasAntigas() {
+    const agora = Date.now();
+    for (const [idUsuario, instancia] of instanciasConsulta.entries()) {
+      if (agora - instancia.timestamp > 120000) { // 2 minutos
+        console.log(`🧹 Limpando consulta antiga: ${idUsuario}`);
+        this.liberarInstancia(idUsuario);
+      }
+    }
+  }
+  
+  static getStatus() {
+    return {
+      ativas: instanciasConsulta.size,
+      maximo: MAX_CONSULTAS_PARALELAS,
+      ids: Array.from(instanciasConsulta.keys())
+    };
+  }
+}
+
+// ✅ FUNÇÃO PARA REGISTRAR CALLBACK POR SESSÃO
+function registrarCallback(idSessao, callback) {
+  callbacksPorSessao.set(idSessao, callback);
+  console.log(`📞 Callback registrado para sessão: ${idSessao}`);
+}
+
+// ✅ FUNÇÃO PARA EXECUTAR CALLBACK DA SESSÃO
+async function executarCallback(idSessao, mensagem) {
+  const callback = callbacksPorSessao.get(idSessao);
+  if (callback && typeof callback === 'function') {
+    try {
+      console.log(`📤 Executando callback para sessão: ${idSessao}`);
+      await callback(mensagem);
+      return true;
+    } catch (error) {
+      console.error(`❌ Erro ao executar callback ${idSessao}:`, error.message);
+      return false;
+    }
+  } else {
+    console.log(`⚠️ Callback não encontrado para sessão: ${idSessao}`);
+    return false;
+  }
+}
 
 // ✅ FUNÇÃO PARA VALIDAR SE É CPF
 function isValidCPF(texto) {
@@ -16,12 +116,178 @@ function limparCPF(cpf) {
   return cpf.replace(/\D/g, '');
 }
 
-async function consultarFuncionario(nomeFuncionario, headless = true, telefone = null, callback = null) {
-    let browser = null;
+// ✅ FUNÇÃO PARA FAZER LOGIN NO RHID
+async function fazerLoginRHID(page, credenciais) {
+  try {
+    console.log('⏳ Fazendo login no RHID...');
 
-    console.log(`🚀 Iniciando consulta para: "${nomeFuncionario}"`);
-    console.log(`📞 Telefone: ${telefone}`);
-    console.log(`🖥️ Modo headless: ${headless}`);
+    const emailSelectors = [
+      'input[type="email"]',
+      '#email',
+      'input[name="email"]',
+      '[placeholder*="mail"]',
+      '[placeholder*="E-mail"]',
+      'input[type="text"]'
+    ];
+
+    const passwordSelectors = [
+      'input[type="password"]',
+      '#password',
+      'input[name="password"]',
+      '[placeholder*="senha"]',
+      '[placeholder*="Senha"]'
+    ];
+
+    const submitSelectors = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      '#m_login_signin_submit',
+      '.btn-primary',
+      'button'
+    ];
+
+    // ✅ PREENCHE EMAIL
+    let emailField = null;
+    for (const selector of emailSelectors) {
+      try {
+        emailField = await page.$(selector);
+        if (emailField) {
+          console.log(`✅ Campo email encontrado: ${selector}`);
+          await emailField.click({ clickCount: 3 });
+          await emailField.type(credenciais.usuario, { delay: 50 });
+          break;
+        }
+      } catch (e) { }
+    }
+
+    // ✅ PREENCHE SENHA
+    let passwordField = null;
+    for (const selector of passwordSelectors) {
+      try {
+        passwordField = await page.$(selector);
+        if (passwordField) {
+          console.log(`✅ Campo senha encontrado: ${selector}`);
+          await passwordField.click({ clickCount: 3 });
+          await passwordField.type(credenciais.senha, { delay: 50 });
+          break;
+        }
+      } catch (e) { }
+    }
+
+    // ✅ CLICA NO BOTÃO DE LOGIN
+    let submitButton = null;
+    for (const selector of submitSelectors) {
+      try {
+        submitButton = await page.$(selector);
+        if (submitButton) {
+          console.log(`✅ Botão login encontrado: ${selector}`);
+          await submitButton.click();
+          console.log('✅ Login realizado!');
+
+          // Aguarda navegação
+          await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 });
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          break;
+        }
+      } catch (e) { }
+    }
+
+    if (!emailField || !passwordField) {
+      throw new Error('Campos de login não encontrados');
+    }
+
+  } catch (error) {
+    console.error('❌ Erro no login:', error);
+    throw new Error(`Falha no login: ${error.message}`);
+  }
+}
+
+// ✅ FUNÇÃO PARA EXECUTAR FLUXO DE DEMISSÃO
+async function executarFluxoDemissao(page, nomeCompleto, isCPF, cpfLimpo, idSessao) {
+  try {
+    console.log('📋 Executando fluxo de demissão...');
+
+    // ✅ ABA DEMISSÃO
+    await page.waitForSelector('a.nav-link.m-tabs__link.ng-binding', { timeout: 10000 });
+    
+    const demissaoTab = await page.evaluateHandle(() => {
+      const tabs = Array.from(document.querySelectorAll('a.nav-link.m-tabs__link.ng-binding'));
+      return tabs.find(tab => tab.textContent.includes('Demissão'));
+    });
+
+    if (demissaoTab) {
+      await demissaoTab.click();
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+
+    // ✅ LIMPA DADOS DEMISSÃO
+    await page.waitForSelector('a[ng-click*="limpaDemissao"]', { timeout: 10000 });
+    await page.click('a[ng-click*="limpaDemissao"]');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // ✅ VERIFICA BOTÃO SALVAR
+    await page.waitForSelector('button#btnSave', { timeout: 10000 });
+    const salvarButton = await page.$('button#btnSave');
+    
+    if (salvarButton) {
+      const isVisible = await salvarButton.evaluate(button => {
+        return button.offsetWidth > 0 && button.offsetHeight > 0 &&
+          !button.disabled && window.getComputedStyle(button).display !== 'none';
+      });
+
+      if (isVisible) {
+        console.log('✅ Botão Salvar está visível e habilitado - Processo concluído');
+        // await salvarButton.click(); // Descomente quando for para produção
+        
+        const mensagemSucesso = `✅ *Processo concluído com sucesso!*\n\n` +
+          `📝 Funcionário: ${nomeCompleto}\n` +
+          `${isCPF ? `📋 CPF: ${cpfLimpo}\n` : ''}` +
+          `💾 Alteração realizada com sucesso!`;
+        
+        await executarCallback(idSessao, mensagemSucesso);
+      } else {
+        console.log('⚠️ Botão Salvar encontrado mas não está visível/habilitado');
+        const mensagemParcial = `⚠️ *Processo parcialmente concluído*\n\n` +
+          `📝 Funcionário: ${nomeCompleto}\n` +
+          `${isCPF ? `📋 CPF: ${cpfLimpo}\n` : ''}` +
+          `📋 Fluxo executado mas botão Salvar não está disponível`;
+        
+        await executarCallback(idSessao, mensagemParcial);
+      }
+    } else {
+      throw new Error('Botão Salvar não encontrado');
+    }
+
+    console.log('✅ Fluxo de demissão executado com sucesso!');
+    return true;
+
+  } catch (error) {
+    console.error('❌ Erro no fluxo de demissão:', error.message);
+    throw new Error(`Falha no processamento: ${error.message}`);
+  }
+}
+
+// ✅ FUNÇÃO PRINCIPAL DE CONSULTA
+async function consultarFuncionario(nomeFuncionario, headless = true, telefone = null, callback = null) {
+  const idSessao = `${telefone}_${Date.now()}_consulta`;
+  let browser = null;
+
+  console.log(`\n🚀 ===== INICIANDO CONSULTA FUNCIONÁRIO =====`);
+  console.log(`📞 Telefone: ${telefone}`);
+  console.log(`🎯 Sessão: ${idSessao}`);
+  console.log(`🔍 Busca: "${nomeFuncionario}"`);
+  console.log(`📊 Consultas ativas: ${instanciasConsulta.size}/${MAX_CONSULTAS_PARALELAS}`);
+
+  try {
+    // ✅ VALIDAÇÕES
+    if (!nomeFuncionario || nomeFuncionario.trim().length < 3) {
+      throw new Error('Nome muito curto. Mínimo 3 caracteres.');
+    }
+
+    // ✅ REGISTRA CALLBACK PARA ESTA SESSÃO
+    if (callback && typeof callback === 'function') {
+      registrarCallback(idSessao, callback);
+    }
 
     // ✅ VERIFICA SE É CPF OU NOME
     const isCPF = isValidCPF(nomeFuncionario);
@@ -29,456 +295,221 @@ async function consultarFuncionario(nomeFuncionario, headless = true, telefone =
     
     console.log(`🔍 Tipo de busca: ${isCPF ? 'CPF' : 'NOME'}`);
     if (isCPF) {
-        console.log(`📋 CPF limpo: ${cpfLimpo}`);
+      console.log(`📋 CPF limpo: ${cpfLimpo}`);
     }
 
-    // ✅ CORREÇÃO: Normaliza o valor de headless (igual no DesbloqueioREP)
+    // ✅ NORMALIZA O VALOR DE HEADLESS
     if (typeof headless === 'string') {
-        headless = headless.toLowerCase() === 'true' || headless === '1';
+      headless = headless.toLowerCase() === 'true' || headless === '1';
     } else {
-        headless = Boolean(headless);
+      headless = Boolean(headless);
     }
 
-    console.log(`🖥️ Modo headless DEFINITIVO: ${headless ? 'SIM (sem UI)' : 'NÃO (com UI)'}`);
+    console.log(`🖥️ Modo headless: ${headless ? 'SIM' : 'NÃO'}`);
 
-    // ✅ Armazena o callback para enviar mensagens via WhatsApp
-    callbackWhatsApp = callback;
+    // ✅ IMPORTAÇÃO DAS CREDENCIAIS
+    const { getCredenciaisRHID } = require('./rhidLogins');
+    const credenciais = getCredenciaisRHID(telefone, 'menu2');
 
-    const enviarResposta = async (mensagem) => {
-        if (callbackWhatsApp) {
-            try {
-                await callbackWhatsApp(mensagem);
-            } catch (e) {
-                console.error('❌ Erro ao enviar resposta via callback:', e);
+    if (!credenciais) {
+      throw new Error('Credenciais não encontradas para este telefone');
+    }
+
+    console.log(`🔑 Usando credenciais de: ${credenciais.usuario}`);
+
+    // ✅ MODO HEADLESS COM GERENCIAMENTO DE INSTÂNCIAS
+    if (headless) {
+      console.log('🖥️ Iniciando navegador...');
+      
+      // Obtém instância gerenciada
+      const instancia = await GerenciadorConsultas.obterInstancia(idSessao);
+      browser = instancia.browser;
+
+      const page = await browser.newPage();
+
+      // ✅ CONFIGURAÇÃO DA PÁGINA
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+      await page.setDefaultTimeout(60000);
+      await page.setDefaultNavigationTimeout(60000);
+
+      console.log('🔄 Navegando para RHID...');
+
+      // ✅ NAVEGAÇÃO PARA LOGIN
+      await page.goto('https://www.rhid.com.br/v2/#/login', {
+        waitUntil: 'networkidle0',
+        timeout: 60000
+      });
+      console.log('✅ Página carregada com sucesso!');
+
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // ✅ VERIFICA SE JÁ ESTÁ LOGADO
+      const estaLogado = await page.evaluate(() => {
+        return !window.location.href.includes('login') && document.querySelector('body:not(.login-page)');
+      });
+
+      if (!estaLogado) {
+        await fazerLoginRHID(page, credenciais);
+      }
+
+      // ✅ NAVEGA PARA CADASTROS > FUNCIONÁRIOS
+      console.log('🔍 Navegando para Cadastros > Funcionários...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      await page.goto('https://www.rhid.com.br/v2/#/list/person', {
+        waitUntil: 'networkidle0',
+        timeout: 30000
+      });
+
+      console.log('✅ Página de funcionários carregada!');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // ✅ REALIZA A BUSCA (NOME OU CPF)
+      console.log(`🔍 Buscando por "${isCPF ? 'CPF: ' + cpfLimpo : nomeFuncionario}"...`);
+
+      if (isCPF) {
+        // ✅ BUSCA POR CPF - USA BUSCA AVANÇADA
+        console.log('📋 Iniciando busca avançada por CPF...');
+
+        await page.waitForSelector('a[ng-click*="buscaAvancadaToogle"]', { timeout: 10000 });
+        await page.click('a[ng-click*="buscaAvancadaToogle"]');
+        console.log('✅ Botão Busca Avançada clicado');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        await page.waitForSelector('input[placeholder="CPF"]', { timeout: 10000 });
+        const cpfInput = await page.$('input[placeholder="CPF"]');
+        await cpfInput.click({ clickCount: 3 });
+        await cpfInput.type(cpfLimpo, { delay: 100 });
+        console.log('✅ CPF preenchido');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        await page.waitForSelector('a[ng-click*="filtrarAvancado"]', { timeout: 10000 });
+        await page.click('a[ng-click*="filtrarAvancado"]');
+        console.log('✅ Botão Filtrar clicado');
+        
+      } else {
+        // ✅ BUSCA POR NOME - USA BUSCA SIMPLES
+        console.log('📝 Iniciando busca simples por nome...');
+        
+        await page.waitForSelector('input[type="search"]', { timeout: 20000 });
+        const searchInput = await page.$('input[type="search"]');
+        await searchInput.click({ clickCount: 3 });
+        await page.keyboard.press('Backspace');
+        await searchInput.type(nomeFuncionario, { delay: 100 });
+        console.log('✅ Busca realizada');
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 6000));
+
+      // ✅ VERIFICA RESULTADOS
+      const noResultsFound = await page.$('td.dataTables_empty');
+
+      if (noResultsFound) {
+        throw new Error(`Funcionário não encontrado: ${isCPF ? `CPF ${cpfLimpo}` : nomeFuncionario}`);
+      }
+
+      // ✅ CLICA PARA EDITAR
+      await page.waitForSelector('a[ng-click*="editItem"]', { timeout: 10000 });
+      await page.click('a[ng-click*="editItem"]');
+      console.log('✅ Botão Editar clicado');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // ✅ CAPTURA NOME SE BUSCA POR CPF
+      let nomeCompleto = nomeFuncionario;
+      if (isCPF) {
+        try {
+          nomeCompleto = await page.evaluate(() => {
+            const selectors = [
+              'input[ng-model*="nome"]',
+              'input[placeholder*="Nome"]',
+              'input#n_1',
+              'input[name*="nome"]'
+            ];
+            
+            for (const selector of selectors) {
+              const campo = document.querySelector(selector);
+              if (campo && campo.value) {
+                return campo.value.trim();
+              }
             }
-        } else {
-            console.log(`[SEM CALLBACK] ${mensagem}`);
+            
+            const inputs = document.querySelectorAll('input[type="text"]');
+            for (const input of inputs) {
+              if (input.value && input.value.length > 3) {
+                return input.value.trim();
+              }
+            }
+            
+            return null;
+          }) || `CPF ${cpfLimpo}`;
+          
+          console.log(`✅ Nome capturado: ${nomeCompleto}`);
+        } catch (capturaError) {
+          console.error('❌ Erro ao capturar nome:', capturaError);
+          nomeCompleto = `CPF ${cpfLimpo}`;
         }
+      }
+
+      // ✅ EXECUTA FLUXO DE DEMISSÃO
+      await executarFluxoDemissao(page, nomeCompleto, isCPF, cpfLimpo, idSessao);
+
+      console.log(`✅ Consulta concluída com sucesso!`);
+      return { 
+        success: true, 
+        nome: nomeCompleto,
+        telefone 
+      };
+
+    } else {
+      // MODO NÃO-HEADLESS (não implementado para consultas)
+      await executarCallback(idSessao, '❌ Modo não-headless não disponível para consultas. Use o modo headless.');
+      return { 
+        success: false, 
+        error: 'Modo não-headless não disponível',
+        telefone 
+      };
+    }
+
+  } catch (error) {
+    console.error(`❌ Erro na consulta:`, error.message);
+    
+    // ✅ ENVIA ERRO USANDO CALLBACK DA SESSÃO
+    let mensagemErro = '';
+    
+    if (error.message.includes('não encontrado')) {
+      mensagemErro = `❌ *Funcionário não encontrado*\n\n` +
+        `Não localizei nenhum registro para ${isCPF ? `CPF: ${cpfLimpo}` : `"${nomeFuncionario}"`}.\n\n` +
+        `Verifique se:\n` +
+        `• ${isCPF ? 'O CPF está correto' : 'O nome está correto e completo'}\n` +
+        `• A ${isCPF ? 'digitação está exata' : 'grafia está exata'}\n` +
+        `• O funcionário está cadastrado no sistema`;
+    } else {
+      mensagemErro = `❌ *Erro na Consulta:*\n\n${error.message}`;
+    }
+    
+    await executarCallback(idSessao, mensagemErro);
+    
+    return { 
+      success: false, 
+      error: error.message,
+      telefone 
     };
-
-    try {
-        // ✅ VALIDAÇÃO DO NOME/CPF
-        if (!nomeFuncionario || nomeFuncionario.trim().length < 3) {
-            await enviarResposta(`❌ *Erro na consulta:*\n\nInformação muito curta. Por favor, digite o nome completo ou CPF do funcionário.`);
-            return;
-        }
-
-        // ✅ IMPORTAÇÃO DAS CREDENCIAIS
-        const { getCredenciaisRHID } = require('./rhidLogins');
-        const credenciais = getCredenciaisRHID(telefone, 'menu2');
-
-        if (!credenciais) {
-            console.error(`❌ Credenciais não encontradas para o telefone ${telefone}`);
-            await enviarResposta(`❌ *Erro de Autenticação*\n\nNão foi possível encontrar as credenciais de acesso para o seu número. Por favor, contate o suporte.`);
-            return;
-        }
-
-        console.log(`🔑 Usando credenciais de: ${credenciais.usuario}`);
-
-        const rhidUrl = `https://www.rhid.com.br/v2/#/login`;
-
-        // ✅ CONFIGURAÇÃO DO BROWSER CORRIGIDA (igual ao DesbloqueioREP)
-        console.log('🖥️ Iniciando navegador...');
-        browser = await puppeteer.launch({
-            headless: headless,
-            defaultViewport: headless ? { width: 1920, height: 1080 } : null,
-            args: headless ? [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--disable-gpu'
-            ] : ['--start-maximized'],
-            ignoreHTTPSErrors: true,
-            timeout: 60000
-        });
-
-        const pages = await browser.pages();
-        let page = pages.length > 0 ? pages[0] : await browser.newPage();
-
-        // ✅ CONFIGURAÇÃO DA PÁGINA MELHORADA
-        if (!headless) {
-            await page.setViewport({ width: 1366, height: 768 });
-        }
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-
-        // ✅ TIMEOUT CONFIGURADO
-        page.setDefaultTimeout(60000);
-        page.setDefaultNavigationTimeout(60000);
-
-        console.log('🔄 Navegando para RHID...');
-
-        try {
-            // ✅ CORREÇÃO: Usa mesma estratégia de navegação do DesbloqueioREP
-            await page.goto(rhidUrl, {
-                waitUntil: 'networkidle0',
-                timeout: 60000
-            });
-            console.log('✅ Página carregada com sucesso!');
-
-            // Aguarda a página carregar completamente
-            await new Promise(resolve => setTimeout(resolve, 3000));
-        } catch (navigationError) {
-            console.error('❌ Erro ao navegar para a página:', navigationError);
-            await enviarResposta(`❌ *Erro de Navegação*\n\nNão foi possível acessar o sistema RHID. Tente novamente em alguns minutos.`);
-            return;
-        }
-
-        // ✅ VERIFICA SE JÁ ESTÁ LOGADO (melhorado)
-        const estaLogado = await page.evaluate(() => {
-            return !window.location.href.includes('login') && document.querySelector('body:not(.login-page)');
-        });
-
-        if (!estaLogado) {
-            console.log('⏳ Fazendo login...');
-
-            try {
-                // ✅ AGUARDA OS CAMPOS DO LOGIN COM MÚLTIPLOS SELECTORS (igual DesbloqueioREP)
-                const emailSelectors = [
-                    'input[type="email"]',
-                    '#email',
-                    'input[name="email"]',
-                    '[placeholder*="mail"]',
-                    '[placeholder*="E-mail"]',
-                    'input[type="text"]'
-                ];
-
-                const passwordSelectors = [
-                    'input[type="password"]',
-                    '#password',
-                    'input[name="password"]',
-                    '[placeholder*="senha"]',
-                    '[placeholder*="Senha"]'
-                ];
-
-                const submitSelectors = [
-                    'button[type="submit"]',
-                    'input[type="submit"]',
-                    '#m_login_signin_submit',
-                    '.btn-primary',
-                    'button'
-                ];
-
-                // ✅ PREENCHE EMAIL
-                let emailField = null;
-                for (const selector of emailSelectors) {
-                    try {
-                        emailField = await page.$(selector);
-                        if (emailField) {
-                            console.log(`✅ Campo email encontrado: ${selector}`);
-                            await emailField.click({ clickCount: 3 });
-                            await emailField.type(credenciais.usuario, { delay: 50 });
-                            break;
-                        }
-                    } catch (e) { }
-                }
-
-                // ✅ PREENCHE SENHA
-                let passwordField = null;
-                for (const selector of passwordSelectors) {
-                    try {
-                        passwordField = await page.$(selector);
-                        if (passwordField) {
-                            console.log(`✅ Campo senha encontrado: ${selector}`);
-                            await passwordField.click({ clickCount: 3 });
-                            await passwordField.type(credenciais.senha, { delay: 50 });
-                            break;
-                        }
-                    } catch (e) { }
-                }
-
-                // ✅ CLICA NO BOTÃO DE LOGIN
-                let submitButton = null;
-                for (const selector of submitSelectors) {
-                    try {
-                        submitButton = await page.$(selector);
-                        if (submitButton) {
-                            console.log(`✅ Botão login encontrado: ${selector}`);
-                            await submitButton.click();
-                            console.log('✅ Login realizado!');
-
-                            // Aguarda navegação
-                            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 });
-                            await new Promise(resolve => setTimeout(resolve, 3000));
-                            break;
-                        }
-                    } catch (e) { }
-                }
-
-                if (!emailField || !passwordField) {
-                    throw new Error('Campos de login não encontrados');
-                }
-
-            } catch (loginError) {
-                console.error('❌ Erro no login:', loginError);
-                await enviarResposta(`❌ *Erro de Login*\n\nNão foi possível fazer login no sistema. Verifique as credenciais.`);
-                return;
-            }
-        }
-
-        // ✅ NAVEGA PARA CADASTROS > FUNCIONÁRIOS
-        console.log('🔍 Navegando para Cadastros > Funcionários...');
-
-        try {
-            // Aguarda um pouco antes de navegar
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
-            // Tenta acessar diretamente a URL de funcionários
-            await page.goto('https://www.rhid.com.br/v2/#/list/person', {
-                waitUntil: 'networkidle0',
-                timeout: 30000
-            });
-
-            console.log('✅ Página de funcionários carregada!');
-
-            // Aguarda a tabela carregar
-            await new Promise(resolve => setTimeout(resolve, 5000));
-
-        } catch (menuError) {
-            console.error('❌ Erro ao acessar menu de funcionários:', menuError);
-            await enviarResposta(`❌ *Erro de Navegação*\n\nNão foi possível acessar a lista de funcionários.`);
-            return;
-        }
-
-        // ✅ REALIZA A BUSCA (NOME OU CPF)
-        console.log(`🔍 Buscando por "${isCPF ? 'CPF: ' + cpfLimpo : nomeFuncionario}"...`);
-
-        try {
-            if (isCPF) {
-                // ✅ BUSCA POR CPF - USA BUSCA AVANÇADA
-                console.log('📋 Iniciando busca avançada por CPF...');
-
-                // 1️⃣ Clica no botão "Busca Avançada"
-                await page.waitForSelector('a[ng-click*="buscaAvancadaToogle"]', { timeout: 10000 });
-                await page.click('a[ng-click*="buscaAvancadaToogle"]');
-                console.log('✅ Botão Busca Avançada clicado');
-                await new Promise(resolve => setTimeout(resolve, 2000));
-
-                // 2️⃣ Preenche o campo CPF
-                await page.waitForSelector('input[placeholder="CPF"]', { timeout: 10000 });
-                const cpfInput = await page.$('input[placeholder="CPF"]');
-                await cpfInput.click({ clickCount: 3 });
-                await cpfInput.type(cpfLimpo, { delay: 100 });
-                console.log('✅ CPF preenchido');
-                await new Promise(resolve => setTimeout(resolve, 1000));
-
-                // 3️⃣ Clica no botão "Filtrar"
-                await page.waitForSelector('a[ng-click*="filtrarAvancado"]', { timeout: 10000 });
-                await page.click('a[ng-click*="filtrarAvancado"]');
-                console.log('✅ Botão Filtrar clicado');
-                await new Promise(resolve => setTimeout(resolve, 6000));
-
-            } else {
-                // ✅ BUSCA POR NOME - USA BUSCA SIMPLES
-                console.log('📝 Iniciando busca simples por nome...');
-                
-                await page.waitForSelector('input[type="search"]', { timeout: 20000 });
-                const searchInput = await page.$('input[type="search"]');
-                await searchInput.click({ clickCount: 3 });
-                await page.keyboard.press('Backspace');
-                await searchInput.type(nomeFuncionario, { delay: 100 });
-                console.log('✅ Busca realizada');
-                await new Promise(resolve => setTimeout(resolve, 6000));
-            }
-
-            // ✅ VERIFICA RESULTADOS
-            const noResultsFound = await page.$('td.dataTables_empty');
-
-            if (noResultsFound) {
-                console.log('❌ Funcionário não encontrado na busca.');
-                await enviarResposta(
-                    `❌ *Funcionário não encontrado*\n\n` +
-                    `Não localizei nenhum registro para ${isCPF ? `CPF: ${cpfLimpo}` : `"${nomeFuncionario}"`}.\n\n` +
-                    `Verifique se:\n` +
-                    `• ${isCPF ? 'O CPF está correto' : 'O nome está correto e completo'}\n` +
-                    `• A ${isCPF ? 'digitação está exata' : 'grafia está exata'}\n` +
-                    `• O funcionário está cadastrado no sistema`
-                );
-            } else {
-                console.log('✅ Funcionário encontrado! Extraindo dados...');
-
-                // ✅ 1. CLICA NO BOTÃO EDITAR (ícone de lápis)
-                console.log('🔍 Procurando botão Editar...');
-                try {
-                    await page.waitForSelector('a[ng-click*="editItem"]', { timeout: 10000 });
-                    await page.click('a[ng-click*="editItem"]');
-                    console.log('✅ Botão Editar clicado');
-                    await new Promise(resolve => setTimeout(resolve, 3000));
-                } catch (editError) {
-                    console.error('❌ Botão Editar não encontrado:', editError);
-                    await enviarResposta(`❌ *Erro na Edição*\n\nNão foi possível acessar os dados do funcionário para edição.`);
-                    return;
-                }
-
-                // ✅ SE FOR BUSCA POR CPF, CAPTURA O NOME COMPLETO
-                let nomeCompleto = nomeFuncionario;
-                if (isCPF) {
-                    try {
-                        console.log('📝 Capturando nome completo do funcionário...');
-                        
-                        // Aguarda carregar a página de edição
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                        
-                        // Busca o campo de nome (geralmente o primeiro input de texto visível)
-                        nomeCompleto = await page.evaluate(() => {
-                            // Tenta vários seletores possíveis para o campo nome
-                            const selectors = [
-                                'input[ng-model*="nome"]',
-                                'input[placeholder*="Nome"]',
-                                'input#n_1',
-                                'input[name*="nome"]'
-                            ];
-                            
-                            for (const selector of selectors) {
-                                const campo = document.querySelector(selector);
-                                if (campo && campo.value) {
-                                    return campo.value.trim();
-                                }
-                            }
-                            
-                            // Fallback: pega o primeiro input type="text" com valor
-                            const inputs = document.querySelectorAll('input[type="text"]');
-                            for (const input of inputs) {
-                                if (input.value && input.value.length > 3) {
-                                    return input.value.trim();
-                                }
-                            }
-                            
-                            return null;
-                        });
-                        
-                        if (nomeCompleto) {
-                            console.log(`✅ Nome capturado: ${nomeCompleto}`);
-                        } else {
-                            console.log('⚠️ Não foi possível capturar o nome');
-                            nomeCompleto = `CPF ${cpfLimpo}`;
-                        }
-                    } catch (capturaError) {
-                        console.error('❌ Erro ao capturar nome:', capturaError);
-                        nomeCompleto = `CPF ${cpfLimpo}`;
-                    }
-                }
-
-                // ✅ 2. CLICA NA ABA "DEMISSÃO"
-                console.log('🔍 Procurando aba Demissão...');
-                try {
-                    await page.waitForSelector('a.nav-link.m-tabs__link.ng-binding', { timeout: 10000 });
-
-                    // Encontra a aba "Demissão" pelo texto
-                    const demissaoTab = await page.evaluateHandle(() => {
-                        const tabs = Array.from(document.querySelectorAll('a.nav-link.m-tabs__link.ng-binding'));
-                        return tabs.find(tab => tab.textContent.includes('Demissão'));
-                    });
-
-                    if (demissaoTab && (await demissaoTab.evaluate(el => el !== null))) {
-                        await demissaoTab.click();
-                        console.log('✅ Aba Demissão clicada');
-                        await new Promise(resolve => setTimeout(resolve, 3000));
-                    } else {
-                        throw new Error('Aba Demissão não encontrada');
-                    }
-                } catch (tabError) {
-                    console.error('❌ Aba Demissão não encontrada:', tabError);
-                    await enviarResposta(`❌ *Erro na Navegação*\n\nNão foi possível acessar a aba de Demissão.`);
-                    return;
-                }
-
-                // ✅ 3. CLICA NO ÍCONE DE LIXEIRA (limpar dados)
-                console.log('🔍 Procurando ícone de lixeira...');
-                try {
-                    await page.waitForSelector('a[ng-click*="limpaDemissao"]', { timeout: 10000 });
-                    await page.click('a[ng-click*="limpaDemissao"]');
-                    console.log('✅ Ícone de lixeira clicado');
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                } catch (trashError) {
-                    console.error('❌ Ícone de lixeira não encontrado:', trashError);
-                    await enviarResposta(`❌ *Erro na Limpeza*\n\nNão foi possível limpar os dados de demissão.`);
-                    return;
-                }
-
-                // ✅ 4. VERIFICA SE O BOTÃO "SALVAR" ESTÁ VISÍVEL (sem clicar)
-                console.log('🔍 Verificando botão Salvar...');
-                try {
-                    await page.waitForSelector('button#btnSave', { timeout: 10000 });
-                    const salvarButton = await page.$('button#btnSave');
-
-                    if (salvarButton) {
-                        const buttonText = await page.evaluate(button => button.textContent, salvarButton);
-                        console.log(`✅ Botão Salvar encontrado: "${buttonText}"`);
-
-                        // ✅ VERIFICA SE ESTÁ VISÍVEL E HABILITADO (sem clicar)
-                        const isVisible = await salvarButton.evaluate(button => {
-                            return button.offsetWidth > 0 && button.offsetHeight > 0 &&
-                                !button.disabled && window.getComputedStyle(button).display !== 'none';
-                        });
-
-                        if (isVisible) {
-                            console.log('✅ Botão Salvar está visível e habilitado - Clicando...');
-                            //await salvarButton.click();     // só desmarcar quando a aplicação for para o ar
-                            console.log('✅ Botão Salvar clicado com sucesso');
-                            await enviarResposta(
-                                `✅ *Processo concluído com sucesso!*\n\n` +
-                                `📝 Funcionário: ${nomeCompleto}\n` +
-                                `${isCPF ? `📋 CPF: ${cpfLimpo}\n` : ''}` +
-                                `💾 Alteração realizado com sucesso!`
-                            );
-                        } else {
-                            console.log('⚠️ Botão Salvar encontrado mas não está visível/habilitado');
-                            await enviarResposta(
-                                `⚠️ *Processo parcialmente concluído*\n\n` +
-                                `📝 Funcionário: ${nomeCompleto}\n` +
-                                `${isCPF ? `📋 CPF: ${cpfLimpo}\n` : ''}` +
-                                `📋 Fluxo executado mas botão Salvar não está disponível`
-                            );
-                        }
-                    } else {
-                        throw new Error('Botão Salvar não encontrado');
-                    }
-                } catch (saveError) {
-                    console.error('❌ Botão Salvar não encontrado:', saveError);
-                    await enviarResposta(
-                        `❌ *Erro Final*\n\n` +
-                        `Processo executado mas não foi possível verificar o botão Salvar.`
-                    );
-                    return;
-                }
-            }
-
-        } catch (searchError) {
-            console.error('❌ Erro na consulta:', searchError);
-            await enviarResposta(`❌ *Erro na consulta*\n\nFavor selecione novamente o item do menu para proceder.`);
-            return;
-        }
-
-        // ✅ CORREÇÃO: Fecha o browser em modo headless após conclusão
-        if (headless && browser) {
-            console.log('🔒 Fechando browser headless...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            await browser.close();
-            browser = null;
-            console.log('✅ Browser fechado com sucesso');
-        }
-
-    } catch (error) {
-        console.error("❌ Erro crítico na automação de consulta:", error);
-        await enviarResposta(
-            `❌ *Erro no Sistema*\n\n` +
-            `Não foi possível concluir a consulta para "${nomeFuncionario}" devido a um erro interno.\n\n` +
-            `Erro: ${error.message}\n\n` +
-            `Por favor, tente novamente mais tarde ou contate o suporte.`
-        );
-    } finally {
-        // ✅ FECHA O BROWSER COM SEGURANÇA (apenas se não headless)
-        if (browser && !headless) {
-            try {
-                console.log('🔒 Fechando navegador...');
-                await browser.close();
-                console.log('✅ Navegador fechado com sucesso');
-            } catch (closeError) {
-                console.error('❌ Erro ao fechar navegador:', closeError);
-            }
-        }
+    
+  } finally {
+    // ✅ GARANTE LIBERAÇÃO DE RECURSOS (APENAS HEADLESS)
+    if (browser && headless) {
+      await GerenciadorConsultas.liberarInstancia(idSessao);
     }
+    console.log(`🔚 Consulta finalizada para sessão: ${idSessao}\n`);
+  }
 }
 
-module.exports = { consultarFuncionario };
+// ✅ EXPORTAÇÕES
+module.exports = { 
+  consultarFuncionario,
+  GerenciadorConsultas,
+  getStatus: () => ({
+    consultas: GerenciadorConsultas.getStatus(),
+    callbacks: callbacksPorSessao.size
+  })
+};

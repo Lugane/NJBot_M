@@ -3,13 +3,111 @@ const { promisify } = require('util');
 const execAsync = promisify(exec);
 const puppeteer = require('puppeteer');
 const { getCredenciaisRHID } = require('./rhidLogins');
-const axios = require("axios");
-const FormData = require("form-data");
-const fs = require('fs').promises;
-const path = require('path');
 
-// Variável para armazenar a função de callback do WhatsApp
-let callbackWhatsApp = null;
+// ✅ CONTROLE DE INSTÂNCIAS ATIVAS
+const instanciasAtivas = new Map();
+const MAX_INSTANCIAS_PARALELAS = 15;
+
+// ✅ GERENCIADOR DE CALLBACKS POR SESSÃO
+const callbacksPorSessao = new Map();
+
+// ✅ GERENCIADOR DE RECURSOS
+class GerenciadorInstancias {
+  static async obterInstancia(idUsuario) {
+    this.limparInstanciasAntigas();
+    
+    if (instanciasAtivas.size >= MAX_INSTANCIAS_PARALELAS) {
+      throw new Error('⚠️ Sistema ocupado. Tente novamente em alguns segundos.');
+    }
+    
+    console.log(`🔄 Criando nova instância para: ${idUsuario}`);
+    
+    const browser = await puppeteer.launch({
+      headless: true,
+      defaultViewport: { width: 1920, height: 1080 },
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu'
+      ],
+      timeout: 60000
+    });
+    
+    const instancia = {
+      browser,
+      timestamp: Date.now(),
+      idUsuario
+    };
+    
+    instanciasAtivas.set(idUsuario, instancia);
+    console.log(`✅ Instância criada. Total ativo: ${instanciasAtivas.size}`);
+    return instancia;
+  }
+  
+  static async liberarInstancia(idUsuario) {
+    const instancia = instanciasAtivas.get(idUsuario);
+    if (instancia) {
+      try {
+        console.log(`🔒 Fechando instância: ${idUsuario}`);
+        await instancia.browser.close();
+        console.log(`✅ Instância fechada: ${idUsuario}`);
+      } catch (error) {
+        console.error(`❌ Erro ao fechar browser ${idUsuario}:`, error.message);
+      }
+      instanciasAtivas.delete(idUsuario);
+      
+      // ✅ LIMPA O CALLBACK DA SESSÃO TAMBÉM
+      callbacksPorSessao.delete(idUsuario);
+      console.log(`📊 Instâncias restantes: ${instanciasAtivas.size}`);
+    }
+  }
+  
+  static limparInstanciasAntigas() {
+    const agora = Date.now();
+    const TIMEOUT_INSTANCIA = 120000; // 2 minutos
+    
+    for (const [idUsuario, instancia] of instanciasAtivas.entries()) {
+      if (agora - instancia.timestamp > TIMEOUT_INSTANCIA) {
+        console.log(`🧹 Limpando instância antiga: ${idUsuario}`);
+        this.liberarInstancia(idUsuario);
+      }
+    }
+  }
+  
+  static getStatus() {
+    return {
+      ativas: instanciasAtivas.size,
+      maximo: MAX_INSTANCIAS_PARALELAS,
+      ids: Array.from(instanciasAtivas.keys())
+    };
+  }
+}
+
+// ✅ FUNÇÃO PARA REGISTRAR CALLBACK POR SESSÃO
+function registrarCallback(idSessao, callback) {
+  callbacksPorSessao.set(idSessao, callback);
+  console.log(`📞 Callback registrado para sessão: ${idSessao}`);
+}
+
+// ✅ FUNÇÃO PARA EXECUTAR CALLBACK DA SESSÃO
+async function executarCallback(idSessao, mensagem) {
+  const callback = callbacksPorSessao.get(idSessao);
+  if (callback && typeof callback === 'function') {
+    try {
+      console.log(`📤 Executando callback para sessão: ${idSessao}`);
+      await callback(mensagem);
+      return true;
+    } catch (error) {
+      console.error(`❌ Erro ao executar callback ${idSessao}:`, error.message);
+      return false;
+    }
+  } else {
+    console.log(`⚠️ Callback não encontrado para sessão: ${idSessao}`);
+    return false;
+  }
+}
 
 // FUNÇÃO PARA FAZER LOGIN NO RHID
 async function fazerLoginRHID(page, credenciais) {
@@ -85,7 +183,7 @@ async function fazerLoginRHID(page, credenciais) {
 
   } catch (error) {
     console.log('⚠️ Erro no login:', error.message);
-    throw error; // Propaga o erro para tratamento superior
+    throw error;
   }
 }
 
@@ -175,7 +273,7 @@ async function clicarSubmenuDesbloqREP(page) {
 }
 
 // FUNÇÃO PARA NAVEGAR PARA DESBLOQUEIO REP
-async function navegarParaDesbloqueioREP(page, dadosREP) {
+async function navegarParaDesbloqueioREP(page, dadosREP, idSessao) {
   try {
     console.log('🧭 Navegando para Desbloqueio REP...');
 
@@ -190,7 +288,7 @@ async function navegarParaDesbloqueioREP(page, dadosREP) {
     }
 
     if (dadosREP && dadosREP.numeroREP && dadosREP.senha) {
-      await preencherFormularioDesbloqueio(page, dadosREP);
+      await preencherFormularioDesbloqueio(page, dadosREP, idSessao);
     }
 
     return true;
@@ -201,7 +299,7 @@ async function navegarParaDesbloqueioREP(page, dadosREP) {
 }
 
 // FUNÇÃO PARA PREENCHER FORMULÁRIO DE DESBLOQUEIO
-async function preencherFormularioDesbloqueio(page, dadosREP) {
+async function preencherFormularioDesbloqueio(page, dadosREP, idSessao) {
   try {
     console.log('📝 Preenchendo formulário com dados do OCR...');
 
@@ -273,7 +371,7 @@ async function preencherFormularioDesbloqueio(page, dadosREP) {
           console.log('✅ Formulário submetido! Aguardando resultado...');
 
           // ✅ CAPTURA O RESULTADO DO DESBLOQUEIO
-          await capturarResultadoDesbloqueio(page, dadosREP.telefone || 'desconhecido');
+          await capturarResultadoDesbloqueio(page, idSessao);
           break;
         }
       } catch (e) { }
@@ -291,7 +389,7 @@ async function preencherFormularioDesbloqueio(page, dadosREP) {
 }
 
 // FUNÇÃO PARA CAPTURAR E ENVIAR RESULTADO
-async function capturarResultadoDesbloqueio(page, telefone) {
+async function capturarResultadoDesbloqueio(page, idSessao) {
   try {
     console.log('📊 Aguardando resultado do desbloqueio...');
     await new Promise(resolve => setTimeout(resolve, 8000));
@@ -326,112 +424,74 @@ async function capturarResultadoDesbloqueio(page, telefone) {
       return dados;
     });
 
-    console.log(`📋 ${resultados.length} resultado(s) encontrado(s)`);
+    console.log(`📋 ${resultados.length} resultado(s) encontrado(s) para sessão: ${idSessao}`);
 
     if (resultados.length === 0) {
       console.log('⚠️ Nenhum resultado encontrado');
-      if (callbackWhatsApp) {
-        await enviarResultadoWhatsApp('Processo concluído, mas nenhum resultado foi retornado pelo sistema.', 'info', telefone);
-      }
+      await executarCallback(idSessao, 'Processo concluído, mas nenhum resultado foi retornado pelo sistema.');
       return null;
     }
 
     // 📤 MONTAGEM DA MENSAGEM
-    if (callbackWhatsApp) {
-      let mensagemFinal = '';
-      let tipoGeral = 'info';
+    let mensagemFinal = '';
+    let tipoGeral = 'info';
 
-      // Extrai as informações específicas
-      let codigoDesbloqueio = '';
-      let avisoDesbloqueio = '';
-      let avisoBateria = '';
+    // Extrai as informações específicas
+    let codigoDesbloqueio = '';
+    let avisoDesbloqueio = '';
+    let avisoBateria = '';
 
-      resultados.forEach(res => {
-        if (res.texto.includes('código de desbloqueio do equipamento modelo iDClass Bio Prox é')) {
-          codigoDesbloqueio = res.texto;
-          tipoGeral = 'sucesso';
-        } else if (res.texto.includes('Este REP já foi desbloqueado em')) {
-          avisoDesbloqueio = res.texto;
-        } else if (res.texto.includes('ATENÇÃO: É necessária a troca imediata da bateria CR2032 deste REP')) {
-          avisoBateria = res.texto;
+    resultados.forEach(res => {
+      if (res.texto.includes('código de desbloqueio do equipamento modelo iDClass Bio Prox é')) {
+        codigoDesbloqueio = res.texto;
+        tipoGeral = 'sucesso';
+      } else if (res.texto.includes('Este REP já foi desbloqueado em')) {
+        avisoDesbloqueio = res.texto;
+      } else if (res.texto.includes('ATENÇÃO: É necessária a troca imediata da bateria CR2032 deste REP')) {
+        avisoBateria = res.texto;
+      }
+    });
+
+    // MONTA A MENSAGEM
+    if (codigoDesbloqueio) {
+      const codigoMatch = codigoDesbloqueio.match(/é (\d+)/);
+      const codigoNumero = codigoMatch ? codigoMatch[1] : '';
+      
+      mensagemFinal = `✅ *DESBLOQUEIO REALIZADO COM SUCESSO!*\n\n` +
+                     `🔓 Código de desbloqueio: *${codigoNumero}*`;
+      
+      if (avisoDesbloqueio || avisoBateria) {
+        mensagemFinal += `\n\n⚠️ ${avisoDesbloqueio} ${avisoBateria}`;
+      }
+    } else {
+      resultados.forEach((res, index) => {
+        if (res.tipo === 'sucesso') {
+          mensagemFinal += `✅ ${res.texto}\n\n`;
+        } else if (res.tipo === 'aviso') {
+          mensagemFinal += `⚠️ ${res.texto}\n\n`;
+        } else if (res.tipo === 'erro') {
+          mensagemFinal += `❌ ${res.texto}\n\n`;
         }
       });
-
-      // MONTA A MENSAGEM
-      if (codigoDesbloqueio) {
-        const codigoMatch = codigoDesbloqueio.match(/é (\d+)/);
-        const codigoNumero = codigoMatch ? codigoMatch[1] : '';
-        
-        mensagemFinal = `O código de desbloqueio do equipamento modelo iDClass Bio Prox é \n${codigoNumero}`;
-        
-        if (avisoDesbloqueio || avisoBateria) {
-          mensagemFinal += `\n\n⚠️ ${avisoDesbloqueio} ${avisoBateria}`;
-        }
-      } else {
-        resultados.forEach((res, index) => {
-          if (res.tipo === 'sucesso') {
-            mensagemFinal += `✅ ${res.texto}\n\n`;
-          } else if (res.tipo === 'aviso') {
-            mensagemFinal += `⚠️ ${res.texto}\n\n`;
-          } else if (res.tipo === 'erro') {
-            mensagemFinal += `❌ ${res.texto}\n\n`;
-          }
-        });
-        mensagemFinal = mensagemFinal.trim();
+      mensagemFinal = mensagemFinal.trim();
+      
+      if (!mensagemFinal) {
+        mensagemFinal = 'ℹ️ *Processamento concluído.*\n\nVerifique o equipamento.';
       }
-
-      await enviarResultadoWhatsApp(mensagemFinal, tipoGeral, telefone);
     }
+
+    // ✅ ENVIA RESULTADO USANDO CALLBACK DA SESSÃO
+    await executarCallback(idSessao, mensagemFinal);
 
     return resultados;
 
   } catch (error) {
     console.log('⚠️ Erro ao capturar resultado:', error.message);
     
-    if (callbackWhatsApp) {
-      await enviarResultadoWhatsApp('Erro ao processar desbloqueio. Verifique manualmente.', 'erro', telefone);
-    }
+    // ✅ ENVIA ERRO USANDO CALLBACK DA SESSÃO
+    await executarCallback(idSessao, '⚠️ Processamento concluído com observações. Verifique manualmente o sistema.');
 
     throw error;
-  }
-}
-
-// FUNÇÃO PARA ENVIAR RESULTADO VIA WHATSAPP
-async function enviarResultadoWhatsApp(resultado, tipo, telefone) {
-  try {
-    if (!callbackWhatsApp) {
-      console.log('⚠️ Callback WhatsApp não disponível');
-      return;
-    }
-
-    let mensagem = '';
-
-    if (tipo === 'sucesso') {
-      mensagem = `✅ DESBLOQUEIO REALIZADO COM SUCESSO! ✅\n\n` +
-                 `📋 Resultado: ${resultado}`;
-
-    } else if (tipo === 'erro') {
-      mensagem = `❌ ERRO NO DESBLOQUEIO\n\n` +
-                 `📋 Detalhes: ${resultado}`;
-
-    } else if (tipo === 'aviso') {
-      mensagem = `⚠️ DESBLOQUEIO COM AVISOS\n\n` +
-                 `📋 Resultado: ${resultado}`;
-
-    } else {
-      mensagem = `📋 RESULTADO DO DESBLOQUEIO\n\n` +
-                 `ℹ️ Status: ${resultado}`;
-    }
-
-    console.log(`📤 Enviando resultado via WhatsApp...`);
-
-    await callbackWhatsApp(mensagem);
-    console.log('✅ Resultado enviado com sucesso!');
-    return true;
-
-  } catch (error) {
-    console.log('❌ Erro ao enviar resultado:', error.message);
-    return false;
   }
 }
 
@@ -482,23 +542,31 @@ async function justOpenInChromeBrowser(rhidUrl, query, telefone, dadosREP = null
   }
 }
 
-// FUNÇÃO PRINCIPAL
+// ✅ FUNÇÃO PRINCIPAL OTIMIZADA COM CALLBACKS POR SESSÃO
 async function openInChrome(query, headless = true, telefone = null, dadosREP = null, callback = null) {
+  const idSessao = `${telefone}_${Date.now()}`;
   let browser = null;
 
   try {
-    // ✅ NORMALIZA O VALOR DE HEADLESS (aceita string, boolean, etc)
+    console.log(`\n🚀 ===== INICIANDO DESBLOQUEIO REP =====`);
+    console.log(`📞 Telefone: ${telefone}`);
+    console.log(`🎯 Sessão: ${idSessao}`);
+    console.log(`🔢 REP: ${dadosREP?.numeroREP || 'N/A'}`);
+    console.log(`👥 Instâncias ativas: ${instanciasAtivas.size}/${MAX_INSTANCIAS_PARALELAS}`);
+
+    // ✅ REGISTRA CALLBACK PARA ESTA SESSÃO
+    if (callback && typeof callback === 'function') {
+      registrarCallback(idSessao, callback);
+    }
+
+    // ✅ NORMALIZA O VALOR DE HEADLESS
     if (typeof headless === 'string') {
       headless = headless.toLowerCase() === 'true' || headless === '1';
     } else {
       headless = Boolean(headless);
     }
     
-    console.log(`🚀 Abrindo RHID para telefone: ${telefone}`);
-    console.log(`💻 Modo headless DEFINITIVO: ${headless ? 'SIM (sem UI)' : 'NÃO (com UI)'}`);
-
-    // ✅ Armazena a função de callback para enviar mensagem via WhatsApp
-    callbackWhatsApp = callback;
+    console.log(`💻 Modo headless: ${headless ? 'SIM' : 'NÃO'}`);
 
     if (dadosREP) {
       console.log(`📋 Dados do REP recebidos do OCR:`, dadosREP);
@@ -511,7 +579,7 @@ async function openInChrome(query, headless = true, telefone = null, dadosREP = 
     // Busca credenciais baseadas no telefone
     let credenciais = null;
     if (telefone) {
-      credenciais = getCredenciaisRHID(telefone, 'menu1'); // ← FORÇA menu1
+      credenciais = getCredenciaisRHID(telefone, 'menu1');
       if (credenciais) {
         console.log(`🔑 Credenciais encontradas para: ${credenciais.usuario}`);
       } else {
@@ -533,50 +601,42 @@ async function openInChrome(query, headless = true, telefone = null, dadosREP = 
       }
     }
 
-    // ✅ MODO HEADLESS OU NÃO-HEADLESS COM PUPPETEER
-    console.log(`🌐 Iniciando automação com Puppeteer (headless: ${headless})...`);
-    
-    browser = await puppeteer.launch({
-      headless: headless,
-      defaultViewport: headless ? { width: 1920, height: 1080 } : null,
-      args: headless ? [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu'
-      ] : ['--start-maximized']
-    });
+    // ✅ MODO HEADLESS COM GERENCIAMENTO DE INSTÂNCIAS
+    if (headless) {
+      console.log(`🌐 Iniciando automação com Puppeteer...`);
+      
+      // Obtém instância gerenciada
+      const instancia = await GerenciadorInstancias.obterInstancia(idSessao);
+      browser = instancia.browser;
 
-    const pages = await browser.pages();
-    let page = pages.length > 0 ? pages[0] : await browser.newPage();
+      const page = await browser.newPage();
+      
+      // Configuração da página
+      await page.setDefaultNavigationTimeout(60000);
+      await page.setDefaultTimeout(30000);
 
-    console.log('📄 Navegando para RHID...');
-    await page.goto(rhidUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+      console.log('📄 Navegando para RHID...');
+      await page.goto(rhidUrl, { waitUntil: 'networkidle0', timeout: 30000 });
 
-    // Aguarda a página carregar
-    await new Promise(resolve => setTimeout(resolve, 3000));
+      // Aguarda a página carregar
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-    // FAZ LOGIN NO RHID
-    await fazerLoginRHID(page, credenciais);
+      // FAZ LOGIN NO RHID
+      await fazerLoginRHID(page, credenciais);
 
-    // NAVEGA E PREENCHE FORMULÁRIO DE DESBLOQUEIO
-    if (dadosREP && dadosREP.numeroREP && dadosREP.senha) {
-      await navegarParaDesbloqueioREP(page, dadosREP);
+      // NAVEGA E PREENCHE FORMULÁRIO DE DESBLOQUEIO
+      if (dadosREP && dadosREP.numeroREP && dadosREP.senha) {
+        await navegarParaDesbloqueioREP(page, dadosREP, idSessao);
+      } else {
+        console.log('⚠️ Dados do REP incompletos, navegando sem preenchimento automático');
+        await navegarParaDesbloqueioREP(page, null, idSessao);
+      }
+
+      console.log('✅ Automação concluída!');
+
     } else {
-      console.log('⚠️ Dados do REP incompletos, navegando sem preenchimento automático');
-      await navegarParaDesbloqueioREP(page, null);
-    }
-
-    console.log('✅ Automação concluída!');
-
-    // ✅ CORREÇÃO PRINCIPAL: Fecha o browser em modo headless após conclusão
-    if (headless && browser) {
-      console.log('🔒 Fechando browser headless...');
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Aguarda um pouco antes de fechar
-      await browser.close();
-      browser = null;
-      console.log('✅ Browser fechado com sucesso');
+      // MODO NÃO-HEADLESS (com interface)
+      return await justOpenInChromeBrowser(rhidUrl, query, telefone, dadosREP);
     }
 
     return {
@@ -593,40 +653,42 @@ async function openInChrome(query, headless = true, telefone = null, dadosREP = 
   } catch (error) {
     console.error("❌ Erro na automação:", error.message);
 
-    // Sempre fechar o browser em caso de erro
-    if (browser) {
+    // ✅ ENVIA ERRO USANDO CALLBACK DA SESSÃO
+    await executarCallback(idSessao, `❌ Erro no desbloqueio: ${error.message}`);
+
+    // ✅ SEMPRE FECHA O BROWSER EM CASO DE ERRO (HEADLESS)
+    if (browser && headless) {
       try {
-        console.log('🔒 Fechando browser devido a erro...');
-        await browser.close();
+        await GerenciadorInstancias.liberarInstancia(idSessao);
       } catch (e) {
         console.log('⚠️ Erro ao fechar browser:', e.message);
       }
     }
 
-    // Se falhar em modo headless, informa o erro
-    if (headless) {
-      if (callbackWhatsApp) {
-        await enviarResultadoWhatsApp(
-          `Erro na automação: ${error.message}`,
-          'erro',
-          telefone
-        );
-      }
-      
-      return {
-        success: false,
-        error: error.message,
-        query: query,
-        telefone: telefone,
-        headless: headless,
-        dadosREP: dadosREP
-      };
+    return {
+      success: false,
+      error: error.message,
+      query: query,
+      telefone: telefone,
+      headless: headless,
+      dadosREP: dadosREP
+    };
+    
+  } finally {
+    // ✅ GARANTE LIBERAÇÃO DE RECURSOS (APENAS HEADLESS)
+    if (browser && headless) {
+      await GerenciadorInstancias.liberarInstancia(idSessao);
     }
-
-    // Se falhar em modo não-headless, tenta abrir o browser manualmente
-    const rhidUrl = `https://www.rhid.com.br/v2/#/login`;
-    return await justOpenInChromeBrowser(rhidUrl, query, telefone, dadosREP);
+    console.log(`🔚 Processo finalizado para sessão: ${idSessao}\n`);
   }
 }
 
-module.exports = { searchInChrome: openInChrome };
+// ✅ EXPORTAÇÕES
+module.exports = { 
+  searchInChrome: openInChrome,
+  GerenciadorInstancias,
+  getStatus: () => ({
+    desbloqueio: GerenciadorInstancias.getStatus(),
+    callbacks: callbacksPorSessao.size
+  })
+};

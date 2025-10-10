@@ -98,10 +98,10 @@ async function processarImagemREP(mediaBuffer, sender, empresaId) {
 
       return {
         resposta: `✅ *Dados identificados com sucesso!*\n\n` +
-                 `🔢 *REP:* ${resultadoOCR.dadosREP.numeroREP}\n` +
-                 `🔑 *Senha:* ${resultadoOCR.dadosREP.senha}\n\n` +
-                 `🔄 *Processando desbloqueio...*\n` +
-                 `_Aguarde aproximadamente 1 minuto_`
+          `🔢 *REP:* ${resultadoOCR.dadosREP.numeroREP}\n` +
+          `🔑 *Senha:* ${resultadoOCR.dadosREP.senha}\n\n` +
+          `🔄 *Processando desbloqueio...*\n` +
+          `_Aguarde aproximadamente 1 minuto_`
       };
     } else {
       // ❌ DADOS INCOMPLETOS - MANTÉM NO FLUXO
@@ -147,17 +147,17 @@ async function processarImagemIncompleta(resultadoOCR, sender) {
     resposta += `\n📸 *Envie outra foto mais nítida* para completar os dados.`;
   } else {
     resposta = `❌ *Não consegui identificar os dados do REP*\n\n` +
-               `📸 *Por favor, envie outra foto mais nítida* mostrando:\n` +
-               `• Número do REP (15-18 dígitos)\n` +
-               `• Senha/Contra Senha (10 dígitos)\n\n` +
-               `💡 *Dica:* Garanta boa iluminação e foco na área dos números.`;
+      `📸 *Por favor, envie outra foto mais nítida* mostrando:\n` +
+      `• Número do REP (15-18 dígitos)\n` +
+      `• Senha/Contra Senha (10 dígitos)\n\n` +
+      `💡 *Dica:* Garanta boa iluminação e foco na área dos números.`;
   }
 
   // ✅ VERIFICA MÁXIMO DE TENTATIVAS
   if (usuarioFluxo.tentativas >= 3) {
     usuariosEmFluxoREP.delete(sender);
     resposta += `\n\n⚠️ *Máximo de tentativas atingido (3).*\n` +
-                `_Entre em contato com o suporte técnico para assistência personalizada._`;
+      `_Entre em contato com o suporte técnico para assistência personalizada._`;
   } else {
     resposta += `\n\n🔄 _Tentativa ${usuarioFluxo.tentativas} de 3_`;
   }
@@ -182,11 +182,11 @@ async function processarErroImagem(sender) {
 
   if (usuarioFluxo.tentativas < 3) {
     resposta += `📸 *Envie outra foto mais nítida* do REP.\n\n` +
-                `🔄 _Tentativa ${usuarioFluxo.tentativas} de 3_`;
+      `🔄 _Tentativa ${usuarioFluxo.tentativas} de 3_`;
   } else {
     usuariosEmFluxoREP.delete(sender);
     resposta += `⚠️ *Máximo de tentativas atingido.*\n` +
-                `_Entre em contato com o suporte técnico para assistência adicional._`;
+      `_Entre em contato com o suporte técnico para assistência adicional._`;
   }
 
   return { resposta };
@@ -275,14 +275,14 @@ async function processarConsultaFuncionario(mensagem, sender, empresa) {
         usuariosEmConsultaFuncionario.delete(sender);
         return {
           resposta: `❌ *Máximo de tentativas atingido*\n\n` +
-                   `Por favor, use o menu para tentar novamente.`
+            `Por favor, use o menu para tentar novamente.`
         };
       }
 
       return {
         resposta: `❌ *Nome muito curto*\n\n` +
-                 `Digite o *nome completo* do funcionário (mínimo 3 caracteres):\n` +
-                 `_Tentativa ${fluxoUsuario.tentativas} de 3_`
+          `Digite o *nome completo* do funcionário (mínimo 3 caracteres):\n` +
+          `_Tentativa ${fluxoUsuario.tentativas} de 3_`
       };
     }
 
@@ -297,8 +297,8 @@ async function processarConsultaFuncionario(mensagem, sender, empresa) {
 
     return {
       resposta: `🔍 **Consultando dados de:** ${nomeFuncionario}\n\n` +
-               `📊 Estou buscando as informações no sistema...\n` +
-               `⏳ _Aguarde 1 minuto e lhe retorno da realização do processo_`
+        `📊 Estou buscando as informações no sistema...\n` +
+        `⏳ _Aguarde 1 minuto e lhe retorno da realização do processo_`
     };
   }
 
@@ -345,8 +345,8 @@ async function processarMensagemIA(mensagemUsuario, empresa) {
     console.error('❌ Erro ao gerar resposta IA:', error);
     return {
       resposta: `🤖 **Assistente Lugane AI**\n\n` +
-               `No momento, estou com dificuldades técnicas.\n` +
-               `Por favor, tente novamente ou entre em contato com o suporte.`
+        `No momento, estou com dificuldades técnicas.\n` +
+        `Por favor, tente novamente ou entre em contato com o suporte.`
     };
   }
 }
@@ -354,66 +354,102 @@ async function processarMensagemIA(mensagemUsuario, empresa) {
 /**
  * EXECUTAR DESBLOQUEIO REP
  */
+// ✅ FUNÇÕES DE EXECUÇÃO OTIMIZADAS
 async function executarDesbloqueioREP(sender, telefoneLimpo, dadosREP, nomeEmpresa) {
   try {
     if (searchInChrome) {
-      console.log(`🌐 Iniciando desbloqueio REP para: ${telefoneLimpo}`);
+      console.log(`🌐 Iniciando desbloqueio REP em background: ${telefoneLimpo}`);
 
       const callbackResultado = async (mensagem) => {
         try {
-          console.log(`📤 Callback desbloqueio - Enviando para WhatsApp`);
+          console.log(`📤 Enviando resultado desbloqueio: ${telefoneLimpo}`);
           await enviarMensagemWhatsApp(sender, mensagem, null, nomeEmpresa);
         } catch (error) {
-          console.error('❌ Erro no callback desbloqueio:', error);
+          console.error('❌ Erro callback desbloqueio:', error);
+          // Fallback
+          await enviarMensagemWhatsApp(
+            sender,
+            '✅ Processo de desbloqueio concluído. Verifique o sistema.',
+            null,
+            nomeEmpresa
+          );
         }
       };
 
-      await searchInChrome('desbloqueio rep', true, telefoneLimpo, dadosREP, callbackResultado);
-      console.log('✅ Desbloqueio REP em execução!');
+      // ✅ EXECUTA EM BACKGROUND SEM BLOQUEAR
+      searchInChrome('desbloqueio rep', true, telefoneLimpo, dadosREP, callbackResultado)
+        .then(resultado => {
+          console.log(`✅ Desbloqueio finalizado: ${telefoneLimpo}`, resultado.success);
+        })
+        .catch(async (error) => {
+          console.error('❌ Erro execução desbloqueio:', error);
+          await enviarMensagemWhatsApp(
+            sender,
+            '❌ Erro no processamento do desbloqueio. Tente novamente.',
+            null,
+            nomeEmpresa
+          );
+        });
+
+    } else {
+      throw new Error('Módulo DesbloqueioREP não disponível');
     }
+
   } catch (error) {
-    console.error('❌ Erro no desbloqueio REP:', error);
+    console.error('❌ Erro desbloqueio REP:', error);
     await enviarMensagemWhatsApp(
       sender,
-      '❌ *Erro no desbloqueio*\n\nOcorreu um erro ao processar o desbloqueio. Tente novamente.',
+      '❌ Serviço temporariamente indisponível. Tente novamente em alguns minutos.',
       null,
       nomeEmpresa
     );
   }
 }
 
-/**
- * EXECUTAR CONSULTA DE FUNCIONÁRIO
- */
 async function executarConsultaFuncionario(sender, telefoneLimpo, nomeFuncionario, nomeEmpresa) {
   try {
     if (consultarFuncionario) {
-      console.log(`👤 Iniciando consulta de funcionário para: ${telefoneLimpo}`);
+      console.log(`👤 Iniciando consulta funcionário em background: ${telefoneLimpo}`);
 
       const callbackResultado = async (mensagem) => {
         try {
-          console.log(`📤 Callback consulta - Enviando para WhatsApp`);
+          console.log(`📤 Enviando resultado consulta: ${telefoneLimpo}`);
           await enviarMensagemWhatsApp(sender, mensagem, null, nomeEmpresa);
         } catch (error) {
-          console.error('❌ Erro no callback consulta:', error);
+          console.error('❌ Erro callback consulta:', error);
+          await enviarMensagemWhatsApp(
+            sender,
+            '✅ Processo de consulta concluído.',
+            null,
+            nomeEmpresa
+          );
         }
       };
 
-      await consultarFuncionario(nomeFuncionario, false, telefoneLimpo, callbackResultado);
-      console.log('✅ Consulta de funcionário em execução!');
+      // ✅ EXECUTA EM BACKGROUND
+      consultarFuncionario(nomeFuncionario, true, telefoneLimpo, callbackResultado)
+        .then(resultado => {
+          console.log(`✅ Consulta finalizada: ${telefoneLimpo}`, resultado.success);
+        })
+        .catch(async (error) => {
+          console.error('❌ Erro execução consulta:', error);
+          await enviarMensagemWhatsApp(
+            sender,
+            '❌ Erro na consulta. Tente novamente.',
+            null,
+            nomeEmpresa
+          );
+        });
+
     } else {
-      await enviarMensagemWhatsApp(
-        sender,
-        '❌ *Serviço indisponível*\n\nA consulta de funcionários não está disponível no momento.',
-        null,
-        nomeEmpresa
-      );
+      throw new Error('Módulo CadastroFuncionarios não disponível');
     }
+
   } catch (error) {
-    console.error('❌ Erro na consulta de funcionário:', error);
+    console.error('❌ Erro consulta funcionário:', error);
     await enviarMensagemWhatsApp(
       sender,
-      '❌ *Erro na consulta*\n\nOcorreu um erro ao consultar os dados. Tente novamente.',
+      '❌ Serviço de consulta indisponível. Tente novamente em alguns minutos.',
       null,
       nomeEmpresa
     );

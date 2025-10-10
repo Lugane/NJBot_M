@@ -12,6 +12,42 @@ function getCredenciaisRHID(telefone, menuSelecionado = null) {
         usuario: 'lugane@cocobambu.com',
         senha: 'Lock203001'
       }
+    },
+    '555196624904': { 
+      // ✅ Menu 1 (REP bloqueado) - suportelugane
+      menu1: {
+        usuario: 'suportelugane@gmail.com',
+        senha: 'Lock203001'
+      },
+      // ✅ Menu 2 (Horários e Folha) - Cocobambu
+      menu2: {
+        usuario: 'lugane@cocobambu.com',
+        senha: 'Lock203001'
+      }
+    },
+    '555193171382': { 
+      // ✅ Menu 1 (REP bloqueado) - suportelugane
+      menu1: {
+        usuario: 'suportelugane@gmail.com',
+        senha: 'Lock203001'
+      },
+      // ✅ Menu 2 (Horários e Folha) - Cocobambu
+      menu2: {
+        usuario: 'lugane@cocobambu.com',
+        senha: 'Lock203001'
+      }
+    },
+    '555181681426': { 
+      // ✅ Menu 1 (REP bloqueado) - suportelugane
+      menu1: {
+        usuario: 'suportelugane@gmail.com',
+        senha: 'Lock203001'
+      },
+      // ✅ Menu 2 (Horários e Folha) - Cocobambu
+      menu2: {
+        usuario: 'lugane@cocobambu.com',
+        senha: 'Lock203001'
+      }
     }
   };
 
